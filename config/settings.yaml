@@ -1,0 +1,7 @@
+db_path: data/screener.db
+log_dir: logs
+backfill_days: 365            # 新加入觀察清單的股票回補天數
+mis:
+  batch_size: 50              # 每次請求的股票數，依實測調整
+  request_interval_sec: 3
+  retry: 3

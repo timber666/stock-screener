@@ -1,0 +1,32 @@
+# 觀察清單（唯一來源）。market: tse = 上市, otc = 上櫃
+# 以下為範例，請換成自己的觀察清單。
+
+industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
+  PCB: [銅箔, 玻纖布, CCL, 硬板, HDI, 載板]
+  半導體: [晶圓代工, 封測]
+
+themes: [AI伺服器, 矽光子, CPO]
+
+stocks:
+  - code: "2330"             # 代號必須加引號
+    name: 台積電
+    market: tse
+    industry: 半導體/晶圓代工  # 格式：族群/子分類；族群未列子分類時只寫族群
+    themes: [AI伺服器]        # 可多個，也可省略
+  - code: "5347"
+    name: 世界
+    market: otc
+    industry: 半導體/晶圓代工
+  - code: "3711"
+    name: 日月光投控
+    market: tse
+    industry: 半導體/封測
+  - code: "2383"
+    name: 台光電
+    market: tse
+    industry: PCB/CCL
+    themes: [AI伺服器]
+  - code: "3037"
+    name: 欣興
+    market: tse
+    industry: PCB/載板
