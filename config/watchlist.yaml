@@ -5,10 +5,13 @@
 #      以及成交量 < 1000 張（處置股與指定保留者除外）的股票
 # 記憶體：來源 記憶體清單.md（2026-10-30 整理）。只含上市櫃，移除成交量 < 500 張，
 #        以及營收與記憶體無關的股票
+# 被動元件：來源 被動元件清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張，
+#          以及營收與被動元件無關的股票
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
   記憶體: [記憶體IC, 記憶體控制IC, DRAM製造, 封測, 模組、儲存, 通路]
+  被動元件: [電感器材料, 電容器材料, 電阻器材料, 電阻器, 電容器, 電感器, 濾波器、振盪器]
 
 themes: [AI伺服器, 矽光子, CPO]
 
@@ -344,3 +347,138 @@ stocks:
     name: 大聯大
     market: tse
     industry: 記憶體/通路
+
+  # ===== 被動元件 =====
+  # 電感器材料
+  - code: "4760"
+    name: 勤凱
+    market: otc
+    industry: 被動元件/電感器材料
+
+  # 電容器材料
+  - code: "6175"
+    name: 立敦
+    market: otc
+    industry: 被動元件/電容器材料
+
+  # 電阻器材料
+  - code: "6127"
+    name: 九豪
+    market: otc
+    industry: 被動元件/電阻器材料
+
+  # 電阻器
+  - code: "2327"
+    name: 國巨
+    market: tse
+    industry: 被動元件/電阻器
+  - code: "2492"
+    name: 華新科
+    market: tse
+    industry: 被動元件/電阻器
+  - code: "2478"
+    name: 大毅
+    market: tse
+    industry: 被動元件/電阻器
+  - code: "3624"
+    name: 光頡
+    market: otc
+    industry: 被動元件/電阻器
+  - code: "6834"
+    name: 天二科技
+    market: tse
+    industry: 被動元件/電阻器
+  - code: "6173"
+    name: 信昌電
+    market: otc
+    industry: 被動元件/電阻器
+  - code: "2428"
+    name: 興勤
+    market: tse
+    industry: 被動元件/電阻器
+  - code: "6224"
+    name: 聚鼎
+    market: tse
+    industry: 被動元件/電阻器
+
+  # 電容器
+  - code: "3026"
+    name: 禾伸堂
+    market: tse
+    industry: 被動元件/電容器
+  - code: "2472"
+    name: 立隆電
+    market: tse
+    industry: 被動元件/電容器
+  - code: "8042"
+    name: 金山電
+    market: otc
+    industry: 被動元件/電容器
+  - code: "6449"
+    name: 鈺邦
+    market: tse
+    industry: 被動元件/電容器
+  - code: "2375"
+    name: 凱美
+    market: tse
+    industry: 被動元件/電容器
+  - code: "3090"
+    name: 日電貿
+    market: tse
+    industry: 被動元件/電容器
+  - code: "5328"
+    name: 華容
+    market: otc
+    industry: 被動元件/電容器
+  - code: "8043"
+    name: 蜜望實
+    market: otc
+    industry: 被動元件/電容器
+  - code: "6284"
+    name: 佳邦
+    market: otc
+    industry: 被動元件/電容器
+
+  # 電感器
+  - code: "3357"
+    name: 臺慶科
+    market: otc
+    industry: 被動元件/電感器
+  - code: "3236"
+    name: 千如
+    market: otc
+    industry: 被動元件/電感器
+  - code: "5228"
+    name: 鈺鎧
+    market: otc
+    industry: 被動元件/電感器
+  - code: "6155"
+    name: 鈞寶
+    market: tse
+    industry: 被動元件/電感器
+  - code: "3207"
+    name: 耀勝
+    market: otc
+    industry: 被動元件/電感器
+  - code: "6156"
+    name: 松上
+    market: otc
+    industry: 被動元件/電感器
+
+  # 濾波器、振盪器
+  - code: "3042"
+    name: 晶技
+    market: tse
+    industry: 被動元件/濾波器、振盪器
+  - code: "2484"
+    name: 希華
+    market: tse
+    industry: 被動元件/濾波器、振盪器
+  - code: "6174"
+    name: 安碁
+    market: otc
+    industry: 被動元件/濾波器、振盪器
+  - code: "3221"
+    name: 台嘉碩
+    market: otc
+    industry: 被動元件/濾波器、振盪器
