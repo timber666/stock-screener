@@ -11,14 +11,15 @@
 #        只含上市櫃，移除成交量 < 500 張，以及營收與光通訊無關的股票
 #        萊德光電、東典光電、聯光通與光學鏡頭各檔依指定加入
 # IC設計：來源 IC設計清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張、
-#        營收與 IC 設計無關，以及與前面族群清單重複的股票
+#        營收與 IC 設計無關，以及與前面族群清單重複的股票；
+#        M31、精拓科、創惟、晶焱、沛亨、大中依指定保留
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
   記憶體: [記憶體IC, 記憶體控制IC, DRAM製造, 封測, 模組、儲存, 通路]
   被動元件: [電感器材料, 電容器材料, 電阻器材料, 電阻器, 電容器, 電感器, 濾波器、振盪器]
   光通訊: [磊晶、晶圓代工, 光元件、光收發模組, 光學鏡頭, 光纜、寬頻設備]
-  IC設計: [IP、設計服務, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 消費性IC, 其他]
+  IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 消費性IC, 其他]
 
 themes: [AI伺服器, 矽光子, CPO]
 
@@ -604,43 +605,41 @@ stocks:
     industry: 光通訊/光纜、寬頻設備
 
   # ===== IC設計 =====
-  # IP、設計服務
-  - code: "3035"
-    name: 智原
-    market: tse
-    industry: IC設計/IP、設計服務
-  - code: "3443"
-    name: 創意
-    market: tse
-    industry: IC設計/IP、設計服務
+  # 矽智財
   - code: "3529"
     name: 力旺
     market: otc
-    industry: IC設計/IP、設計服務
-  - code: "3661"
-    name: 世芯-KY
-    market: tse
-    industry: IC設計/IP、設計服務
-  - code: "4953"
-    name: 緯致
-    market: otc
-    industry: IC設計/IP、設計服務
+    industry: IC設計/矽智財
   - code: "6533"
     name: 晶心科
     market: tse
-    industry: IC設計/IP、設計服務
-  - code: "6695"
-    name: 芯鼎
+    industry: IC設計/矽智財
+  - code: "6643"
+    name: M31
+    market: otc
+    industry: IC設計/矽智財
+
+  # ASIC設計
+  - code: "3035"
+    name: 智原
     market: tse
-    industry: IC設計/IP、設計服務
+    industry: IC設計/ASIC設計
+  - code: "3443"
+    name: 創意
+    market: tse
+    industry: IC設計/ASIC設計
+  - code: "3661"
+    name: 世芯-KY
+    market: tse
+    industry: IC設計/ASIC設計
   - code: "8227"
     name: 巨有科技
     market: otc
-    industry: IC設計/IP、設計服務
+    industry: IC設計/ASIC設計
   - code: "8054"
     name: 安國
     market: otc
-    industry: IC設計/IP、設計服務
+    industry: IC設計/ASIC設計
 
   # 網路通訊IC
   - code: "2379"
@@ -661,10 +660,6 @@ stocks:
     industry: IC設計/網路通訊IC
   - code: "5274"
     name: 信驊
-    market: otc
-    industry: IC設計/網路通訊IC
-  - code: "6138"
-    name: 茂達
     market: otc
     industry: IC設計/網路通訊IC
   - code: "6526"
@@ -691,12 +686,24 @@ stocks:
     name: 聯陽
     market: tse
     industry: IC設計/輸出入介面IC
+  - code: "4951"
+    name: 精拓科
+    market: otc
+    industry: IC設計/輸出入介面IC
   - code: "5269"
     name: 祥碩
     market: tse
     industry: IC設計/輸出入介面IC
+  - code: "6104"
+    name: 創惟
+    market: otc
+    industry: IC設計/輸出入介面IC
   - code: "6233"
     name: 旺玖
+    market: otc
+    industry: IC設計/輸出入介面IC
+  - code: "6411"
+    name: 晶焱
     market: otc
     industry: IC設計/輸出入介面IC
   - code: "6756"
@@ -717,18 +724,26 @@ stocks:
     name: 譜瑞-KY
     market: otc
     industry: IC設計/顯示器驅動IC
-
-  # 影像感測IC
   - code: "3034"
     name: 聯詠
     market: tse
-    industry: IC設計/影像感測IC
+    industry: IC設計/顯示器驅動IC
+  - code: "4961"
+    name: 天鈺
+    market: tse
+    industry: IC設計/顯示器驅動IC
+
+  # 影像感測IC
   - code: "3227"
     name: 原相
     market: otc
     industry: IC設計/影像感測IC
   - code: "8016"
     name: 矽創
+    market: tse
+    industry: IC設計/影像感測IC
+  - code: "6695"
+    name: 芯鼎
     market: tse
     industry: IC設計/影像感測IC
 
@@ -755,13 +770,17 @@ stocks:
     name: 尼克森
     market: otc
     industry: IC設計/電源管理IC
-  - code: "4961"
-    name: 天鈺
-    market: tse
+  - code: "6291"
+    name: 沛亨
+    market: otc
     industry: IC設計/電源管理IC
   - code: "6415"
     name: 矽力-KY
     market: tse
+    industry: IC設計/電源管理IC
+  - code: "6435"
+    name: 大中
+    market: otc
     industry: IC設計/電源管理IC
   - code: "6693"
     name: 廣閎科
@@ -774,6 +793,10 @@ stocks:
   - code: "8261"
     name: 富鼎
     market: tse
+    industry: IC設計/電源管理IC
+  - code: "6138"
+    name: 茂達
+    market: otc
     industry: IC設計/電源管理IC
 
   # 消費性IC
