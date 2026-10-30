@@ -6,7 +6,7 @@
 # 記憶體：來源 記憶體清單.md（2026-10-30 整理）。只含上市櫃，移除成交量 < 500 張，
 #        以及營收與記憶體無關的股票
 # 被動元件：來源 被動元件清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張，
-#          以及營收與被動元件無關的股票
+#          以及營收與被動元件無關的股票；聚鼎、松上依指定移除
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
@@ -228,10 +228,6 @@ stocks:
     name: 嘉聯益
     market: tse
     industry: PCB/PCB製造
-  - code: "6207"
-    name: 雷科
-    market: otc
-    industry: PCB/PCB製造
   - code: "8074"
     name: 鉅橡
     market: otc
@@ -396,9 +392,9 @@ stocks:
     name: 興勤
     market: tse
     industry: 被動元件/電阻器
-  - code: "6224"
-    name: 聚鼎
-    market: tse
+  - code: "6207"
+    name: 雷科
+    market: otc
     industry: 被動元件/電阻器
 
   # 電容器
@@ -458,10 +454,6 @@ stocks:
     industry: 被動元件/電感器
   - code: "3207"
     name: 耀勝
-    market: otc
-    industry: 被動元件/電感器
-  - code: "6156"
-    name: 松上
     market: otc
     industry: 被動元件/電感器
 
