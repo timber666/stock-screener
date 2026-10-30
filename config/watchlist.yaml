@@ -1,14 +1,19 @@
 # 觀察清單（唯一來源）。market: tse = 上市, otc = 上櫃
 # 格式：code 必須加引號；industry 寫「族群/子分類」，族群未列子分類時只寫族群；themes 可多個，也可省略
-# 來源：PCB概念股清單.md（2026-10-30 整理）；市場別依證交所 ISIN 代號清單查證
-# 2026-10-30 篩選：移除 PCB 相關營收比重過低，以及當日成交量 < 1000 張（處置股與指定保留者除外）的股票
+# 市場別依證交所 ISIN 代號清單查證；成交量為 2026-10-30 證交所、櫃買中心收盤資料
+# PCB：來源 PCB概念股清單.md（2026-10-30 整理）。移除 PCB 相關營收比重過低，
+#      以及成交量 < 1000 張（處置股與指定保留者除外）的股票
+# 記憶體：來源 記憶體清單.md（2026-10-30 整理）。只含上市櫃，移除成交量 < 500 張，
+#        以及營收與記憶體無關的股票
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
+  記憶體: [記憶體IC, 記憶體控制IC, DRAM製造, 封測, 模組、儲存, 通路]
 
 themes: [AI伺服器, 矽光子, CPO]
 
 stocks:
+  # ===== PCB =====
   # 上游｜材料
   - code: "1303"
     name: 南亞
@@ -250,3 +255,92 @@ stocks:
     name: 精成科
     market: tse
     industry: PCB/基板組裝加工
+
+  # ===== 記憶體 =====
+  # 記憶體IC
+  - code: "2408"
+    name: 南亞科
+    market: tse
+    industry: 記憶體/記憶體IC
+  - code: "2344"
+    name: 華邦電
+    market: tse
+    industry: 記憶體/記憶體IC
+  - code: "2337"
+    name: 旺宏
+    market: tse
+    industry: 記憶體/記憶體IC
+  - code: "3006"
+    name: 晶豪科
+    market: tse
+    industry: 記憶體/記憶體IC
+  - code: "5351"
+    name: 鈺創
+    market: otc
+    industry: 記憶體/記憶體IC
+  - code: "6531"
+    name: 愛普
+    market: tse
+    industry: 記憶體/記憶體IC
+
+  # 記憶體控制IC
+  - code: "8299"
+    name: 群聯
+    market: otc
+    industry: 記憶體/記憶體控制IC
+
+  # DRAM製造
+  - code: "6770"
+    name: 力積電
+    market: tse
+    industry: 記憶體/DRAM製造
+
+  # 封測
+  - code: "8131"
+    name: 福懋科
+    market: tse
+    industry: 記憶體/封測
+  - code: "8110"
+    name: 華東
+    market: tse
+    industry: 記憶體/封測
+
+  # 模組、儲存
+  - code: "3260"
+    name: 威剛
+    market: otc
+    industry: 記憶體/模組、儲存
+  - code: "2451"
+    name: 創見
+    market: tse
+    industry: 記憶體/模組、儲存
+  - code: "4967"
+    name: 十銓
+    market: tse
+    industry: 記憶體/模組、儲存
+  - code: "4973"
+    name: 廣穎
+    market: otc
+    industry: 記憶體/模組、儲存
+  - code: "8271"
+    name: 宇瞻
+    market: tse
+    industry: 記憶體/模組、儲存
+  - code: "3135"
+    name: 凌航
+    market: tse
+    industry: 記憶體/模組、儲存
+  - code: "5289"
+    name: 宜鼎
+    market: otc
+    industry: 記憶體/模組、儲存
+
+  # 通路
+  - code: "8112"
+    name: 至上
+    market: tse
+    industry: 記憶體/通路
+  - code: "3702"
+    name: 大聯大
+    market: tse
+    industry: 記憶體/通路
