@@ -1,6 +1,7 @@
 # 觀察清單（唯一來源）。market: tse = 上市, otc = 上櫃
 # 格式：code 必須加引號；industry 寫「族群/子分類」，族群未列子分類時只寫族群；themes 可多個，也可省略
 # 來源：PCB概念股清單.md（2026-10-30 整理）；市場別依證交所 ISIN 代號清單查證
+# 2026-10-30 篩選：移除 PCB 相關營收比重過低，以及當日成交量 < 1000 張（處置股除外）的股票
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
@@ -29,21 +30,9 @@ stocks:
     name: 德宏
     market: otc
     industry: PCB/材料
-  - code: "1717"
-    name: 長興
-    market: tse
-    industry: PCB/材料
-  - code: "4764"
-    name: 雙鍵
-    market: tse
-    industry: PCB/材料
   - code: "3645"
     name: 達邁
     market: tse
-    industry: PCB/材料
-  - code: "3388"
-    name: 崇越電
-    market: otc
     industry: PCB/材料
   - code: "4989"
     name: 榮科
@@ -54,18 +43,11 @@ stocks:
     market: otc
     industry: PCB/材料
 
+
   # 上游｜設備、耗材
   - code: "1528"
     name: 恩德
     market: tse
-    industry: PCB/設備、耗材
-  - code: "1595"
-    name: 川寶
-    market: otc
-    industry: PCB/設備、耗材
-  - code: "1785"
-    name: 光洋科
-    market: otc
     industry: PCB/設備、耗材
   - code: "2467"
     name: 志聖
@@ -79,29 +61,13 @@ stocks:
     name: 德律
     market: tse
     industry: PCB/設備、耗材
-  - code: "3093"
-    name: 港建
-    market: otc
-    industry: PCB/設備、耗材
   - code: "3455"
     name: 由田
-    market: otc
-    industry: PCB/設備、耗材
-  - code: "3485"
-    name: 敘豐
     market: otc
     industry: PCB/設備、耗材
   - code: "3498"
     name: 陽程
     market: otc
-    industry: PCB/設備、耗材
-  - code: "3535"
-    name: 晶彩科
-    market: tse
-    industry: PCB/設備、耗材
-  - code: "3563"
-    name: 牧德
-    market: tse
     industry: PCB/設備、耗材
   - code: "4542"
     name: 科嶠
@@ -111,49 +77,9 @@ stocks:
     name: 達航科技
     market: otc
     industry: PCB/設備、耗材
-  - code: "5536"
-    name: 聖暉
-    market: otc
-    industry: PCB/設備、耗材
-  - code: "6438"
-    name: 迅得
-    market: tse
-    industry: PCB/設備、耗材
-  - code: "6658"
-    name: 聯策
-    market: tse
-    industry: PCB/設備、耗材
-  - code: "6664"
-    name: 群翊
-    market: otc
-    industry: PCB/設備、耗材
-  - code: "6706"
-    name: 惠特
-    market: tse
-    industry: PCB/設備、耗材
   - code: "6727"
     name: 亞泰金屬
     market: otc
-    industry: PCB/設備、耗材
-  - code: "6877"
-    name: 鏵友益
-    market: otc
-    industry: PCB/設備、耗材
-  - code: "7730"
-    name: 暉盛-創
-    market: tse
-    industry: PCB/設備、耗材
-  - code: "7795"
-    name: 長廣
-    market: tse
-    industry: PCB/設備、耗材
-  - code: "7825"
-    name: 和亞智慧
-    market: otc
-    industry: PCB/設備、耗材
-  - code: "8438"
-    name: 昶昕
-    market: tse
     industry: PCB/設備、耗材
   - code: "3167"
     name: 大量
@@ -163,6 +89,7 @@ stocks:
     name: 尖點
     market: tse
     industry: PCB/設備、耗材
+
 
   # 中游｜銅箔基板
   - code: "2383"
@@ -176,10 +103,6 @@ stocks:
   - code: "6213"
     name: 聯茂
     market: tse
-    industry: PCB/銅箔基板
-  - code: "8291"
-    name: 尚茂
-    market: otc
     industry: PCB/銅箔基板
   - code: "6672"
     name: 騰輝電子-KY
@@ -197,32 +120,12 @@ stocks:
     name: 亞電
     market: otc
     industry: PCB/銅箔基板
-  - code: "6509"
-    name: 聚和
-    market: otc
-    industry: PCB/銅箔基板
-  - code: "2328"
-    name: 廣宇
-    market: tse
-    industry: PCB/銅箔基板
-  - code: "5381"
-    name: 光譜
-    market: otc
-    industry: PCB/銅箔基板
   - code: "5498"
     name: 凱崴
     market: otc
     industry: PCB/銅箔基板
-  - code: "6224"
-    name: 聚鼎
-    market: tse
-    industry: PCB/銅箔基板
   - code: "6269"
     name: 台郡
-    market: tse
-    industry: PCB/銅箔基板
-  - code: "3010"
-    name: 華立
     market: tse
     industry: PCB/銅箔基板
 
@@ -263,29 +166,9 @@ stocks:
     name: 毅嘉
     market: tse
     industry: PCB/PCB製造
-  - code: "3114"
-    name: 好德
-    market: otc
-    industry: PCB/PCB製造
-  - code: "3115"
-    name: 富榮綱
-    market: otc
-    industry: PCB/PCB製造
-  - code: "3229"
-    name: 晟鈦
-    market: tse
-    industry: PCB/PCB製造
-  - code: "3276"
-    name: 宇環
-    market: otc
-    industry: PCB/PCB製造
   - code: "3321"
     name: 同泰
     market: tse
-    industry: PCB/PCB製造
-  - code: "3390"
-    name: 旭軟
-    market: otc
     industry: PCB/PCB製造
   - code: "3715"
     name: 定穎投控
@@ -299,20 +182,8 @@ stocks:
     name: 泰鼎-KY
     market: tse
     industry: PCB/PCB製造
-  - code: "5291"
-    name: 邑昇
-    market: otc
-    industry: PCB/PCB製造
-  - code: "5321"
-    name: 美而快
-    market: otc
-    industry: PCB/PCB製造
   - code: "5439"
     name: 高技
-    market: otc
-    industry: PCB/PCB製造
-  - code: "5464"
-    name: 霖宏
     market: otc
     industry: PCB/PCB製造
   - code: "5469"
@@ -331,46 +202,15 @@ stocks:
     name: 嘉聯益
     market: tse
     industry: PCB/PCB製造
-  - code: "6156"
-    name: 松上
-    market: otc
-    industry: PCB/PCB製造
-  - code: "6194"
-    name: 育富
-    market: otc
-    industry: PCB/PCB製造
   - code: "6207"
     name: 雷科
-    market: otc
-    industry: PCB/PCB製造
-  - code: "6210"
-    name: 慶生
-    market: otc
-    industry: PCB/PCB製造
-  - code: "6271"
-    name: 同欣電
-    market: tse
-    industry: PCB/PCB製造
-  - code: "6597"
-    name: 立誠
-    market: otc
-    industry: PCB/PCB製造
-  - code: "6835"
-    name: 圓裕
-    market: tse
-    industry: PCB/PCB製造
-  - code: "8074"
-    name: 鉅橡
-    market: otc
-    industry: PCB/PCB製造
-  - code: "8155"
-    name: 博智
     market: otc
     industry: PCB/PCB製造
   - code: "8213"
     name: 志超
     market: tse
     industry: PCB/PCB製造
+
 
   # 中游｜基板組裝加工
   - code: "2313"
@@ -385,23 +225,3 @@ stocks:
     name: 精成科
     market: tse
     industry: PCB/基板組裝加工
-  - code: "5355"
-    name: 佳總
-    market: otc
-    industry: PCB/基板組裝加工
-  - code: "3520"
-    name: 華盈
-    market: otc
-    industry: PCB/基板組裝加工
-  - code: "3665"
-    name: 貿聯-KY
-    market: tse
-    industry: PCB/基板組裝加工
-  - code: "6266"
-    name: 泰詠
-    market: otc
-    industry: PCB/基板組裝加工
-
-# 以下不在範圍內（PROJECT_PLAN.md 第 2 節：只含上市、上櫃），暫不列入：
-#   興櫃：7932 昱鐳應材、7419 達勝、3644 凌嘉科、3585 聯致、6407 相互
-#   證交所代號清單查無（應已下市或合併）：3144 新揚科、6251 定穎、5349 先豐、8183 精星
