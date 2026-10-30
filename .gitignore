@@ -1,0 +1,26 @@
+# 機密與本機資料（PROJECT_PLAN.md 第 13 節）
+.env
+data/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 測試與工具快取
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# 編輯器與系統檔
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
