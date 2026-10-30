@@ -43,7 +43,6 @@ stocks:
     market: otc
     industry: PCB/材料
 
-
   # 上游｜設備、耗材
   - code: "1528"
     name: 恩德
@@ -89,7 +88,6 @@ stocks:
     name: 尖點
     market: tse
     industry: PCB/設備、耗材
-
 
   # 中游｜銅箔基板
   - code: "2383"
@@ -210,7 +208,6 @@ stocks:
     name: 志超
     market: tse
     industry: PCB/PCB製造
-
 
   # 中游｜基板組裝加工
   - code: "2313"
