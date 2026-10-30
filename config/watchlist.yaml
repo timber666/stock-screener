@@ -10,12 +10,15 @@
 # 光通訊：來源 光通訊清單.md（2026-10-31 整理），不含「下游 封裝、測試、交換器」段。
 #        只含上市櫃，移除成交量 < 500 張，以及營收與光通訊無關的股票
 #        萊德光電、東典光電、聯光通與光學鏡頭各檔依指定加入
+# IC設計：來源 IC設計清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張、
+#        營收與 IC 設計無關，以及與前面族群清單重複的股票
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
   記憶體: [記憶體IC, 記憶體控制IC, DRAM製造, 封測, 模組、儲存, 通路]
   被動元件: [電感器材料, 電容器材料, 電阻器材料, 電阻器, 電容器, 電感器, 濾波器、振盪器]
   光通訊: [磊晶、晶圓代工, 光元件、光收發模組, 光學鏡頭, 光纜、寬頻設備]
+  IC設計: [IP、設計服務, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 消費性IC, 其他]
 
 themes: [AI伺服器, 矽光子, CPO]
 
@@ -599,3 +602,196 @@ stocks:
     name: 聯光通
     market: otc
     industry: 光通訊/光纜、寬頻設備
+
+  # ===== IC設計 =====
+  # IP、設計服務
+  - code: "3035"
+    name: 智原
+    market: tse
+    industry: IC設計/IP、設計服務
+  - code: "3443"
+    name: 創意
+    market: tse
+    industry: IC設計/IP、設計服務
+  - code: "3529"
+    name: 力旺
+    market: otc
+    industry: IC設計/IP、設計服務
+  - code: "3661"
+    name: 世芯-KY
+    market: tse
+    industry: IC設計/IP、設計服務
+  - code: "4953"
+    name: 緯致
+    market: otc
+    industry: IC設計/IP、設計服務
+  - code: "6533"
+    name: 晶心科
+    market: tse
+    industry: IC設計/IP、設計服務
+  - code: "6695"
+    name: 芯鼎
+    market: tse
+    industry: IC設計/IP、設計服務
+  - code: "8227"
+    name: 巨有科技
+    market: otc
+    industry: IC設計/IP、設計服務
+  - code: "8054"
+    name: 安國
+    market: otc
+    industry: IC設計/IP、設計服務
+
+  # 網路通訊IC
+  - code: "2379"
+    name: 瑞昱
+    market: tse
+    industry: IC設計/網路通訊IC
+  - code: "2454"
+    name: 聯發科
+    market: tse
+    industry: IC設計/網路通訊IC
+  - code: "3094"
+    name: 聯傑
+    market: tse
+    industry: IC設計/網路通訊IC
+  - code: "4968"
+    name: 立積
+    market: tse
+    industry: IC設計/網路通訊IC
+  - code: "5274"
+    name: 信驊
+    market: otc
+    industry: IC設計/網路通訊IC
+  - code: "6138"
+    name: 茂達
+    market: otc
+    industry: IC設計/網路通訊IC
+  - code: "6526"
+    name: 達發
+    market: tse
+    industry: IC設計/網路通訊IC
+  - code: "6708"
+    name: 天擎
+    market: otc
+    industry: IC設計/網路通訊IC
+  - code: "8040"
+    name: 九暘
+    market: otc
+    industry: IC設計/網路通訊IC
+
+  # 磁碟儲存控制器IC
+  - code: "2401"
+    name: 凌陽
+    market: tse
+    industry: IC設計/磁碟儲存控制器IC
+
+  # 輸出入介面IC
+  - code: "3014"
+    name: 聯陽
+    market: tse
+    industry: IC設計/輸出入介面IC
+  - code: "5269"
+    name: 祥碩
+    market: tse
+    industry: IC設計/輸出入介面IC
+  - code: "6233"
+    name: 旺玖
+    market: otc
+    industry: IC設計/輸出入介面IC
+  - code: "6756"
+    name: 威鋒電子
+    market: tse
+    industry: IC設計/輸出入介面IC
+
+  # 顯示器驅動IC
+  - code: "3141"
+    name: 晶宏
+    market: otc
+    industry: IC設計/顯示器驅動IC
+  - code: "3545"
+    name: 敦泰
+    market: tse
+    industry: IC設計/顯示器驅動IC
+  - code: "4966"
+    name: 譜瑞-KY
+    market: otc
+    industry: IC設計/顯示器驅動IC
+
+  # 影像感測IC
+  - code: "3034"
+    name: 聯詠
+    market: tse
+    industry: IC設計/影像感測IC
+  - code: "3227"
+    name: 原相
+    market: otc
+    industry: IC設計/影像感測IC
+  - code: "8016"
+    name: 矽創
+    market: tse
+    industry: IC設計/影像感測IC
+
+  # 微控制器IC
+  - code: "5471"
+    name: 松翰
+    market: tse
+    industry: IC設計/微控制器IC
+  - code: "6202"
+    name: 盛群
+    market: tse
+    industry: IC設計/微控制器IC
+  - code: "6907"
+    name: 雅特力-KY
+    market: otc
+    industry: IC設計/微控制器IC
+  - code: "4919"
+    name: 新唐
+    market: tse
+    industry: IC設計/微控制器IC
+
+  # 電源管理IC
+  - code: "3317"
+    name: 尼克森
+    market: otc
+    industry: IC設計/電源管理IC
+  - code: "4961"
+    name: 天鈺
+    market: tse
+    industry: IC設計/電源管理IC
+  - code: "6415"
+    name: 矽力-KY
+    market: tse
+    industry: IC設計/電源管理IC
+  - code: "6693"
+    name: 廣閎科
+    market: otc
+    industry: IC設計/電源管理IC
+  - code: "6719"
+    name: 力智
+    market: tse
+    industry: IC設計/電源管理IC
+  - code: "8261"
+    name: 富鼎
+    market: tse
+    industry: IC設計/電源管理IC
+
+  # 消費性IC
+  - code: "2436"
+    name: 偉詮電
+    market: tse
+    industry: IC設計/消費性IC
+  - code: "2458"
+    name: 義隆
+    market: tse
+    industry: IC設計/消費性IC
+  - code: "3041"
+    name: 揚智
+    market: tse
+    industry: IC設計/消費性IC
+
+  # 其他
+  - code: "2363"
+    name: 矽統
+    market: tse
+    industry: IC設計/其他
