@@ -7,11 +7,14 @@
 #        以及營收與記憶體無關的股票
 # 被動元件：來源 被動元件清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張，
 #          以及營收與被動元件無關的股票；聚鼎、松上依指定移除
+# 光通訊：來源 光通訊清單.md（2026-10-31 整理），不含「下游 封裝、測試、交換器」段。
+#        只含上市櫃，移除成交量 < 500 張，以及營收與光通訊無關的股票
 
 industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
   PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
   記憶體: [記憶體IC, 記憶體控制IC, DRAM製造, 封測, 模組、儲存, 通路]
   被動元件: [電感器材料, 電容器材料, 電阻器材料, 電阻器, 電容器, 電感器, 濾波器、振盪器]
+  光通訊: [磊晶、晶圓代工, 光元件、光收發模組, 光纜、寬頻設備]
 
 themes: [AI伺服器, 矽光子, CPO]
 
@@ -474,3 +477,82 @@ stocks:
     name: 台嘉碩
     market: otc
     industry: 被動元件/濾波器、振盪器
+
+  # ===== 光通訊 =====
+  # 磊晶、晶圓代工
+  - code: "3081"
+    name: 聯亞
+    market: otc
+    industry: 光通訊/磊晶、晶圓代工
+  - code: "2455"
+    name: 全新
+    market: tse
+    industry: 光通訊/磊晶、晶圓代工
+  - code: "4971"
+    name: IET-KY
+    market: otc
+    industry: 光通訊/磊晶、晶圓代工
+  - code: "3105"
+    name: 穩懋
+    market: otc
+    industry: 光通訊/磊晶、晶圓代工
+  - code: "4991"
+    name: 環宇-KY
+    market: otc
+    industry: 光通訊/磊晶、晶圓代工
+
+  # 光元件、光收發模組
+  - code: "3163"
+    name: 波若威
+    market: otc
+    industry: 光通訊/光元件、光收發模組
+  - code: "3234"
+    name: 光環
+    market: otc
+    industry: 光通訊/光元件、光收發模組
+  - code: "3363"
+    name: 上詮
+    market: otc
+    industry: 光通訊/光元件、光收發模組
+  - code: "4977"
+    name: 眾達-KY
+    market: tse
+    industry: 光通訊/光元件、光收發模組
+  - code: "6442"
+    name: 光聖
+    market: tse
+    industry: 光通訊/光元件、光收發模組
+  - code: "4979"
+    name: 華星光
+    market: otc
+    industry: 光通訊/光元件、光收發模組
+  - code: "6451"
+    name: 訊芯-KY
+    market: tse
+    industry: 光通訊/光元件、光收發模組
+  - code: "4908"
+    name: 前鼎
+    market: otc
+    industry: 光通訊/光元件、光收發模組
+  - code: "3450"
+    name: 聯鈞
+    market: tse
+    industry: 光通訊/光元件、光收發模組
+
+  # 光纜、寬頻設備
+  - code: "8011"
+    name: 台通
+    market: tse
+    industry: 光通訊/光纜、寬頻設備
+  - code: "3704"
+    name: 合勤控
+    market: tse
+    industry: 光通訊/光纜、寬頻設備
+  - code: "8089"
+    name: 康全電訊
+    market: otc
+    industry: 光通訊/光纜、寬頻設備
+  - code: "2485"
+    name: 兆赫
+    market: tse
+    industry: 光通訊/光纜、寬頻設備
