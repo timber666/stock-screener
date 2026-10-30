@@ -18,7 +18,7 @@ industries:                  # 族群 → 子分類；順序決定顯示順序�
   光學: [光學材料, 光學鏡頭]
   網通: [寬頻設備, 系統整合、電信服務]
 
-themes: [AI伺服器, 矽光子, CPO, ASIC]
+themes: [AI伺服器, 矽光子, CPO]
 
 stocks:
   # ===== PCB =====
@@ -575,7 +575,6 @@ stocks:
     name: 聯發科
     market: tse
     industry: IC設計/網路通訊IC
-    themes: [ASIC]
   - code: "3094"
     name: 聯傑
     market: tse
