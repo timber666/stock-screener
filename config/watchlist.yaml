@@ -1,50 +1,31 @@
 # 觀察清單（唯一來源）。market: tse = 上市, otc = 上櫃
 # 格式：code 必須加引號；industry 寫「族群/子分類」，族群未列子分類時只寫族群；themes 可多個，也可省略
+# 分類：industry 為公司「做什麼」，依主要營收決定（同類產品合併計算）；市場「炒什麼」另以 themes 標註
 # 市場別依證交所 ISIN 代號清單查證；成交量為 2026-10-30 證交所、櫃買中心收盤資料
-# PCB：來源 PCB概念股清單.md（2026-10-30 整理）。移除 PCB 相關營收比重過低，
-#      以及成交量 < 1000 張（處置股與指定保留者除外）的股票
-# 記憶體：來源 記憶體清單.md（2026-10-30 整理）。只含上市櫃，移除成交量 < 500 張，
-#        以及營收與記憶體無關的股票
-# 被動元件：來源 被動元件清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張，
-#          以及營收與被動元件無關的股票；聚鼎、松上依指定移除
-# 光通訊：來源 光通訊清單.md（2026-10-31 整理），不含「下游 封裝、測試、交換器」段。
-#        只含上市櫃，移除成交量 < 500 張，以及營收與光通訊無關的股票
-#        萊德光電、東典光電、聯光通與光學鏡頭各檔依指定加入
-# IC設計：來源 IC設計清單.md（2026-10-31 整理）。只含上市櫃，移除成交量 < 500 張、
-#        營收與 IC 設計無關，以及與前面族群清單重複的股票；
-#        M31、精拓科、創惟、晶焱、沛亨、大中依指定保留
+# 選股來源與篩選（2026-10-30～31，個別加回或移除見 git 紀錄）：
+#   PCB 概念股清單：移除 PCB 相關營收比重過低、成交量 < 1000 張（處置股除外）者
+#   記憶體、被動元件、光通訊（不含下游段）、IC 設計清單：只含上市櫃，移除成交量 < 500 張、
+#   營收與該產業無關，以及與前面清單重複者
+#   半導體製造、光學、網通：重新分類時由上述清單移入
 
-industries:                  # 族群 → 子分類，子分類依上游到下游排列（決定顯示順序）
-  PCB: [材料, 設備、耗材, 銅箔基板, PCB製造, 基板組裝加工]
-  記憶體: [記憶體IC, 記憶體控制IC, DRAM製造, 封測, 模組、儲存, 通路]
+industries:                  # 族群 → 子分類；順序決定顯示順序（產業鏈依上游到下游）
+  PCB: [材料, 玻璃纖維、玻纖布, 設備、耗材, 銅箔基板, PCB製造]
+  記憶體: [記憶體IC, 封測, 模組、儲存, 通路]
   被動元件: [電感器材料, 電容器材料, 電阻器材料, 電阻器, 電容器, 電感器, 濾波器、振盪器]
-  光通訊: [磊晶、晶圓代工, 光元件、光收發模組, 光學鏡頭, 光纜、寬頻設備]
-  IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 消費性IC, 其他]
+  光通訊: [磊晶、晶圓代工, 光元件、光收發模組]
+  IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 功率元件, 消費性IC, 其他]
+  半導體製造: [設備, 晶圓代工, 封測]
+  光學: [光學材料, 光學鏡頭]
+  網通: [寬頻設備, 系統整合、電信服務]
 
 themes: [AI伺服器, 矽光子, CPO, ASIC]
 
 stocks:
   # ===== PCB =====
-  # 上游｜材料
+  # 材料
   - code: "1303"
     name: 南亞
     market: tse
-    industry: PCB/材料
-  - code: "1802"
-    name: 台玻
-    market: tse
-    industry: PCB/材料
-  - code: "1815"
-    name: 富喬
-    market: otc
-    industry: PCB/材料
-  - code: "5340"
-    name: 建榮
-    market: otc
-    industry: PCB/材料
-  - code: "5475"
-    name: 德宏
-    market: otc
     industry: PCB/材料
   - code: "3645"
     name: 達邁
@@ -63,7 +44,25 @@ stocks:
     market: otc
     industry: PCB/材料
 
-  # 上游｜設備、耗材
+  # 玻璃纖維、玻纖布
+  - code: "1802"
+    name: 台玻
+    market: tse
+    industry: PCB/玻璃纖維、玻纖布
+  - code: "1815"
+    name: 富喬
+    market: otc
+    industry: PCB/玻璃纖維、玻纖布
+  - code: "5340"
+    name: 建榮
+    market: otc
+    industry: PCB/玻璃纖維、玻纖布
+  - code: "5475"
+    name: 德宏
+    market: otc
+    industry: PCB/玻璃纖維、玻纖布
+
+  # 設備、耗材
   - code: "1528"
     name: 恩德
     market: tse
@@ -79,10 +78,6 @@ stocks:
   - code: "3030"
     name: 德律
     market: tse
-    industry: PCB/設備、耗材
-  - code: "3455"
-    name: 由田
-    market: otc
     industry: PCB/設備、耗材
   - code: "3498"
     name: 陽程
@@ -120,8 +115,20 @@ stocks:
     name: 尖點
     market: tse
     industry: PCB/設備、耗材
+  - code: "5498"
+    name: 凱崴
+    market: otc
+    industry: PCB/設備、耗材
+  - code: "8074"
+    name: 鉅橡
+    market: otc
+    industry: PCB/設備、耗材
+  - code: "6207"
+    name: 雷科
+    market: otc
+    industry: PCB/設備、耗材
 
-  # 中游｜銅箔基板
+  # 銅箔基板
   - code: "2383"
     name: 台光電
     market: tse
@@ -150,16 +157,12 @@ stocks:
     name: 亞電
     market: otc
     industry: PCB/銅箔基板
-  - code: "5498"
-    name: 凱崴
-    market: otc
-    industry: PCB/銅箔基板
+
+  # PCB製造
   - code: "6269"
     name: 台郡
     market: tse
-    industry: PCB/銅箔基板
-
-  # 中游｜PCB 製造（硬板、軟板、IC 載板）
+    industry: PCB/PCB製造
   - code: "3037"
     name: 欣興
     market: tse
@@ -236,10 +239,6 @@ stocks:
     name: 嘉聯益
     market: tse
     industry: PCB/PCB製造
-  - code: "8074"
-    name: 鉅橡
-    market: otc
-    industry: PCB/PCB製造
   - code: "8155"
     name: 博智
     market: otc
@@ -248,20 +247,18 @@ stocks:
     name: 志超
     market: tse
     industry: PCB/PCB製造
-
-  # 中游｜基板組裝加工
   - code: "2313"
     name: 華通
     market: tse
-    industry: PCB/基板組裝加工
+    industry: PCB/PCB製造
   - code: "2316"
     name: 楠梓電
     market: tse
-    industry: PCB/基板組裝加工
+    industry: PCB/PCB製造
   - code: "6191"
     name: 精成科
     market: tse
-    industry: PCB/基板組裝加工
+    industry: PCB/PCB製造
 
   # ===== 記憶體 =====
   # 記憶體IC
@@ -290,18 +287,6 @@ stocks:
     market: tse
     industry: 記憶體/記憶體IC
 
-  # 記憶體控制IC
-  - code: "8299"
-    name: 群聯
-    market: otc
-    industry: 記憶體/記憶體控制IC
-
-  # DRAM製造
-  - code: "6770"
-    name: 力積電
-    market: tse
-    industry: 記憶體/DRAM製造
-
   # 封測
   - code: "8131"
     name: 福懋科
@@ -313,6 +298,10 @@ stocks:
     industry: 記憶體/封測
 
   # 模組、儲存
+  - code: "8299"
+    name: 群聯
+    market: otc
+    industry: 記憶體/模組、儲存
   - code: "3260"
     name: 威剛
     market: otc
@@ -347,16 +336,16 @@ stocks:
     name: 至上
     market: tse
     industry: 記憶體/通路
-  - code: "3702"
-    name: 大聯大
-    market: tse
-    industry: 記憶體/通路
 
   # ===== 被動元件 =====
   # 電感器材料
   - code: "4760"
     name: 勤凱
     market: otc
+    industry: 被動元件/電感器材料
+  - code: "6155"
+    name: 鈞寶
+    market: tse
     industry: 被動元件/電感器材料
 
   # 電容器材料
@@ -372,14 +361,6 @@ stocks:
     industry: 被動元件/電阻器材料
 
   # 電阻器
-  - code: "2327"
-    name: 國巨
-    market: tse
-    industry: 被動元件/電阻器
-  - code: "2492"
-    name: 華新科
-    market: tse
-    industry: 被動元件/電阻器
   - code: "2478"
     name: 大毅
     market: tse
@@ -392,20 +373,28 @@ stocks:
     name: 天二科技
     market: tse
     industry: 被動元件/電阻器
-  - code: "6173"
-    name: 信昌電
-    market: otc
-    industry: 被動元件/電阻器
   - code: "2428"
     name: 興勤
     market: tse
     industry: 被動元件/電阻器
-  - code: "6207"
-    name: 雷科
-    market: otc
+  - code: "2375"
+    name: 凱美
+    market: tse
     industry: 被動元件/電阻器
 
   # 電容器
+  - code: "2327"
+    name: 國巨
+    market: tse
+    industry: 被動元件/電容器
+  - code: "2492"
+    name: 華新科
+    market: tse
+    industry: 被動元件/電容器
+  - code: "6173"
+    name: 信昌電
+    market: otc
+    industry: 被動元件/電容器
   - code: "3026"
     name: 禾伸堂
     market: tse
@@ -420,10 +409,6 @@ stocks:
     industry: 被動元件/電容器
   - code: "6449"
     name: 鈺邦
-    market: tse
-    industry: 被動元件/電容器
-  - code: "2375"
-    name: 凱美
     market: tse
     industry: 被動元件/電容器
   - code: "3090"
@@ -455,10 +440,6 @@ stocks:
   - code: "5228"
     name: 鈺鎧
     market: otc
-    industry: 被動元件/電感器
-  - code: "6155"
-    name: 鈞寶
-    market: tse
     industry: 被動元件/電感器
   - code: "3207"
     name: 耀勝
@@ -539,10 +520,6 @@ stocks:
     name: 前鼎
     market: otc
     industry: 光通訊/光元件、光收發模組
-  - code: "3450"
-    name: 聯鈞
-    market: tse
-    industry: 光通訊/光元件、光收發模組
   - code: "7717"
     name: 萊德光電-KY
     market: otc
@@ -551,58 +528,6 @@ stocks:
     name: 東典光電
     market: otc
     industry: 光通訊/光元件、光收發模組
-
-  # 光學鏡頭
-  - code: "3008"
-    name: 大立光
-    market: tse
-    industry: 光通訊/光學鏡頭
-  - code: "3406"
-    name: 玉晶光
-    market: tse
-    industry: 光通訊/光學鏡頭
-  - code: "3362"
-    name: 先進光
-    market: otc
-    industry: 光通訊/光學鏡頭
-  - code: "3441"
-    name: 聯一光
-    market: otc
-    industry: 光通訊/光學鏡頭
-  - code: "3504"
-    name: 揚明光
-    market: tse
-    industry: 光通訊/光學鏡頭
-  - code: "6209"
-    name: 今國光
-    market: tse
-    industry: 光通訊/光學鏡頭
-  - code: "6668"
-    name: 中揚光
-    market: tse
-    industry: 光通訊/光學鏡頭
-
-  # 光纜、寬頻設備
-  - code: "8011"
-    name: 台通
-    market: tse
-    industry: 光通訊/光纜、寬頻設備
-  - code: "3704"
-    name: 合勤控
-    market: tse
-    industry: 光通訊/光纜、寬頻設備
-  - code: "8089"
-    name: 康全電訊
-    market: otc
-    industry: 光通訊/光纜、寬頻設備
-  - code: "2485"
-    name: 兆赫
-    market: tse
-    industry: 光通訊/光纜、寬頻設備
-  - code: "4903"
-    name: 聯光通
-    market: otc
-    industry: 光通訊/光纜、寬頻設備
 
   # ===== IC設計 =====
   # 矽智財
@@ -767,10 +692,6 @@ stocks:
     industry: IC設計/微控制器IC
 
   # 電源管理IC
-  - code: "3317"
-    name: 尼克森
-    market: otc
-    industry: IC設計/電源管理IC
   - code: "6291"
     name: 沛亨
     market: otc
@@ -779,26 +700,32 @@ stocks:
     name: 矽力-KY
     market: tse
     industry: IC設計/電源管理IC
-  - code: "6435"
-    name: 大中
-    market: otc
-    industry: IC設計/電源管理IC
-  - code: "6693"
-    name: 廣閎科
-    market: otc
-    industry: IC設計/電源管理IC
   - code: "6719"
     name: 力智
-    market: tse
-    industry: IC設計/電源管理IC
-  - code: "8261"
-    name: 富鼎
     market: tse
     industry: IC設計/電源管理IC
   - code: "6138"
     name: 茂達
     market: otc
     industry: IC設計/電源管理IC
+
+  # 功率元件
+  - code: "3317"
+    name: 尼克森
+    market: otc
+    industry: IC設計/功率元件
+  - code: "6435"
+    name: 大中
+    market: otc
+    industry: IC設計/功率元件
+  - code: "6693"
+    name: 廣閎科
+    market: otc
+    industry: IC設計/功率元件
+  - code: "8261"
+    name: 富鼎
+    market: tse
+    industry: IC設計/功率元件
 
   # 消費性IC
   - code: "2436"
@@ -819,3 +746,80 @@ stocks:
     name: 矽統
     market: tse
     industry: IC設計/其他
+
+  # ===== 半導體製造 =====
+  # 設備
+  - code: "3455"
+    name: 由田
+    market: otc
+    industry: 半導體製造/設備
+
+  # 晶圓代工
+  - code: "6770"
+    name: 力積電
+    market: tse
+    industry: 半導體製造/晶圓代工
+
+  # 封測
+  - code: "3450"
+    name: 聯鈞
+    market: tse
+    industry: 半導體製造/封測
+
+  # ===== 光學 =====
+  # 光學材料
+  - code: "3441"
+    name: 聯一光
+    market: otc
+    industry: 光學/光學材料
+
+  # 光學鏡頭
+  - code: "3008"
+    name: 大立光
+    market: tse
+    industry: 光學/光學鏡頭
+  - code: "3406"
+    name: 玉晶光
+    market: tse
+    industry: 光學/光學鏡頭
+  - code: "3362"
+    name: 先進光
+    market: otc
+    industry: 光學/光學鏡頭
+  - code: "3504"
+    name: 揚明光
+    market: tse
+    industry: 光學/光學鏡頭
+  - code: "6209"
+    name: 今國光
+    market: tse
+    industry: 光學/光學鏡頭
+  - code: "6668"
+    name: 中揚光
+    market: tse
+    industry: 光學/光學鏡頭
+
+  # ===== 網通 =====
+  # 寬頻設備
+  - code: "3704"
+    name: 合勤控
+    market: tse
+    industry: 網通/寬頻設備
+  - code: "8089"
+    name: 康全電訊
+    market: otc
+    industry: 網通/寬頻設備
+  - code: "2485"
+    name: 兆赫
+    market: tse
+    industry: 網通/寬頻設備
+
+  # 系統整合、電信服務
+  - code: "8011"
+    name: 台通
+    market: tse
+    industry: 網通/系統整合、電信服務
+  - code: "4903"
+    name: 聯光通
+    market: otc
+    industry: 網通/系統整合、電信服務
