@@ -21,7 +21,7 @@ industries:                  # 族群 → 子分類，子分類依上游到下�
   光通訊: [磊晶、晶圓代工, 光元件、光收發模組, 光學鏡頭, 光纜、寬頻設備]
   IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 消費性IC, 其他]
 
-themes: [AI伺服器, 矽光子, CPO]
+themes: [AI伺服器, 矽光子, CPO, ASIC]
 
 stocks:
   # ===== PCB =====
@@ -650,6 +650,7 @@ stocks:
     name: 聯發科
     market: tse
     industry: IC設計/網路通訊IC
+    themes: [ASIC]
   - code: "3094"
     name: 聯傑
     market: tse
