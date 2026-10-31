@@ -1,6 +1,7 @@
 """核心資料型別（PROJECT_PLAN.md 10.1）。"""
 
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 
 
@@ -22,3 +23,16 @@ class StockInfo:
     def industry(self) -> str:
         """產業鏈位置，格式同 watchlist.yaml：族群/子分類。"""
         return f"{self.group}/{self.subcategory}" if self.subcategory else self.group
+
+
+@dataclass(frozen=True)
+class DailyBar:
+    """一根日 K，價格未還原（PROJECT_PLAN.md 8.3）。"""
+
+    code: str
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int                     # 單位：張

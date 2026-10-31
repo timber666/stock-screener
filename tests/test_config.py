@@ -40,6 +40,7 @@ def test_repo_config_loads() -> None:
     config = load_config(REPO_CONFIG_DIR)
 
     assert config.settings.mis.request_interval_sec == 3.0
+    assert config.settings.finmind.timeout_sec == 30.0
     assert config.rules.trend.pivot_ma == 5
     assert [r.id for r in config.rules.entry_rules] == [
         "bull_ma5_breakout",
@@ -150,6 +151,22 @@ def test_non_positive_backfill_days_is_rejected(config_dir: Path) -> None:
     edit_yaml(config_dir / "settings.yaml", lambda d: d.update(backfill_days=0))
 
     with pytest.raises(ConfigError, match="backfill_days：必須大於 0"):
+        load_config(config_dir)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("timeout_sec", 0, "timeout_sec：必須大於 0"),
+        ("retry", -1, "retry：不可為負數"),
+        ("retry_backoff_sec", -1, "retry_backoff_sec：不可為負數"),
+        ("request_interval_sec", "1", "request_interval_sec：應為數字"),
+    ],
+)
+def test_invalid_finmind_setting_is_rejected(config_dir: Path, key: str, value: Any, message: str) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d["finmind"].update({key: value}))
+
+    with pytest.raises(ConfigError, match=f"finmind > {message}"):
         load_config(config_dir)
 
 

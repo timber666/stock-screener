@@ -21,6 +21,14 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True)
+class FinMindSettings:
+    timeout_sec: float
+    retry: int
+    retry_backoff_sec: float
+    request_interval_sec: float
+
+
+@dataclass(frozen=True)
 class MisSettings:
     batch_size: int
     request_interval_sec: float
@@ -32,6 +40,7 @@ class Settings:
     db_path: Path
     log_dir: Path
     backfill_days: int
+    finmind: FinMindSettings
     mis: MisSettings
 
 
@@ -104,7 +113,21 @@ def load_secrets(env_file: Path) -> Secrets:
 def _load_settings(path: Path) -> Settings:
     data = _read_yaml(path)
     where = path.name
-    _check_keys(data, {"db_path", "log_dir", "backfill_days", "mis"}, where)
+    _check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis"}, where)
+
+    finmind_where = f"{where} > finmind"
+    finmind_data = _get(data, "finmind", dict, where)
+    _check_keys(finmind_data, {"timeout_sec", "retry", "retry_backoff_sec", "request_interval_sec"}, finmind_where)
+    finmind = FinMindSettings(
+        timeout_sec=_get(finmind_data, "timeout_sec", float, finmind_where),
+        retry=_get(finmind_data, "retry", int, finmind_where),
+        retry_backoff_sec=_get(finmind_data, "retry_backoff_sec", float, finmind_where),
+        request_interval_sec=_get(finmind_data, "request_interval_sec", float, finmind_where),
+    )
+    _require(finmind.timeout_sec > 0, f"{finmind_where} > timeout_sec：必須大於 0")
+    _require(finmind.retry >= 0, f"{finmind_where} > retry：不可為負數")
+    _require(finmind.retry_backoff_sec >= 0, f"{finmind_where} > retry_backoff_sec：不可為負數")
+    _require(finmind.request_interval_sec >= 0, f"{finmind_where} > request_interval_sec：不可為負數")
 
     mis_where = f"{where} > mis"
     mis_data = _get(data, "mis", dict, where)
@@ -122,6 +145,7 @@ def _load_settings(path: Path) -> Settings:
         db_path=Path(_get(data, "db_path", str, where)),
         log_dir=Path(_get(data, "log_dir", str, where)),
         backfill_days=_get(data, "backfill_days", int, where),
+        finmind=finmind,
         mis=mis,
     )
     _require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")

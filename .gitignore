@@ -1,7 +1,7 @@
 # 機密與本機資料（PROJECT_PLAN.md 第 13 節）
 .env
-data/
-logs/
+/data/
+/logs/
 
 # Python
 __pycache__/

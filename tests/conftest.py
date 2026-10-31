@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 import yaml
 
 from screener.logging_setup import reset_logging
@@ -38,3 +39,13 @@ def _reset_logging() -> Iterator[None]:
     # 關閉 log 檔 handler，避免 Windows 上暫存目錄的檔案被鎖住
     yield
     reset_logging()
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """測試不可依賴網路（PROJECT_PLAN.md 第 13 節）：任何真的送出的 HTTP 請求都會失敗。"""
+
+    def blocked(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("測試不可連線到網路；請注入假的 session 或資料來源")
+
+    monkeypatch.setattr(requests.Session, "send", blocked)

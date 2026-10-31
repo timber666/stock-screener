@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
-from screener.config import ConfigError, load_config
-from screener.jobs import daily_update, intraday_scan
+from screener.config import ConfigError, load_config, load_secrets
+from screener.jobs import JobFailed, daily_update, intraday_scan
 from screener.logging_setup import setup_logging
 
 logger = logging.getLogger("screener.cli")     # 以 -m 執行時 __name__ 是 "__main__"
@@ -16,6 +16,8 @@ logger = logging.getLogger("screener.cli")     # 以 -m 執行時 __name__ 是 "
 EXIT_OK = 0
 EXIT_FAILED = 1
 EXIT_CONFIG_ERROR = 2
+
+ENV_FILE = Path(".env")                         # 與 config/ 一樣相對於目前目錄
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,10 +76,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "update":
-            daily_update.run(config)
+            daily_update.run(config, load_secrets(ENV_FILE))
         else:
             intraday_scan.run(config, dry_run=args.dry_run, replay=args.replay)
-    except NotImplementedError as exc:
+    except (JobFailed, NotImplementedError) as exc:
         logger.error("%s", exc)
         return EXIT_FAILED
     except Exception:

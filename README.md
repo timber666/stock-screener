@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M0（專案骨架），下一步是 M1（盤後資料）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 🚧 開發中：已完成 M1（盤後資料），下一步是 M2（均線、轉折點與趨勢判斷）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 架構
 
@@ -43,8 +43,8 @@ pip install -e ".[dev]"
 |---|---|
 | `config/watchlist.yaml` | 觀察清單、族群與題材（附範例，請換成自己的清單） |
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
-| `config/settings.yaml` | 資料庫與 log 路徑、回補天數、MIS 請求頻率 |
-| `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製 |
+| `config/settings.yaml` | 資料庫與 log 路徑、回補天數、FinMind 與 MIS 的請求頻率、逾時與重試 |
+| `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得 |
 
 設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類、題材，都會直接報錯並指出位置。
 
@@ -64,6 +64,13 @@ python -m screener --help
 | `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑，供非交易時段測試與展示 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`。
+
+### 盤後更新（`update`）
+
+- 第一次執行會為每檔股票回補 `backfill_days`（預設 365）天的日 K，之後只補抓資料庫最後一筆之後的資料，資料庫建在 `data/screener.db`。
+- 每檔一次請求。FinMind 免費會員每小時上限 600 次，觀察清單 290 檔首次回補約需 5 分鐘。
+- FinMind 每個交易日約 17:30 更新，請在此之後執行。
+- 中途失敗（網路、超過請求上限等）時，已寫入的資料會保留，重新執行即可從中斷處繼續。
 
 ## 測試
 
