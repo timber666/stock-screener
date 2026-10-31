@@ -6,6 +6,8 @@
 #   PCB 概念股清單：移除 PCB 相關營收比重過低、成交量 < 1000 張（處置股除外）者
 #   記憶體、被動元件、光通訊（不含下游段）、IC 設計清單：只含上市櫃，移除成交量 < 500 張、
 #   營收與該產業無關，以及與前面清單重複者
+#   AI 伺服器概念股清單（另補清單遺漏的電源、電池、散熱、機殼、連接器廠）：同上，
+#   並先排除半導體設備、檢測、封測、材料類股（另開產業）
 #   半導體製造、光學、網通：重新分類時由上述清單移入
 
 industries:                  # 族群 → 子分類；順序決定顯示順序（產業鏈依上游到下游）
@@ -16,7 +18,12 @@ industries:                  # 族群 → 子分類；順序決定顯示順序�
   IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 功率元件, 消費性IC, 其他]
   半導體製造: [設備, 晶圓代工, 封測]
   光學: [光學材料, 光學鏡頭]
-  網通: [寬頻設備, 系統整合、電信服務]
+  網通: [交換器, 寬頻設備, 系統整合、電信服務]
+  電腦及週邊: [系統代工, 品牌, 系統整合、通路]
+  散熱: [散熱模組, 風扇, 熱交換器]
+  機構件: [機殼, 轉軸]
+  電源: [電源供應器, 電池]
+  連接器: [連接器, 線材]
 
 themes: [AI伺服器, 矽光子, CPO]
 
@@ -758,6 +765,10 @@ stocks:
     name: 力積電
     market: tse
     industry: 半導體製造/晶圓代工
+  - code: "2330"
+    name: 台積電
+    market: tse
+    industry: 半導體製造/晶圓代工
 
   # 封測
   - code: "3450"
@@ -799,6 +810,12 @@ stocks:
     industry: 光學/光學鏡頭
 
   # ===== 網通 =====
+  # 交換器
+  - code: "2345"
+    name: 智邦
+    market: tse
+    industry: 網通/交換器
+
   # 寬頻設備
   - code: "3704"
     name: 合勤控
@@ -822,3 +839,164 @@ stocks:
     name: 聯光通
     market: otc
     industry: 網通/系統整合、電信服務
+
+  # ===== 電腦及週邊 =====
+  # 系統代工
+  - code: "2317"
+    name: 鴻海
+    market: tse
+    industry: 電腦及週邊/系統代工
+  - code: "6669"
+    name: 緯穎
+    market: tse
+    industry: 電腦及週邊/系統代工
+  - code: "2356"
+    name: 英業達
+    market: tse
+    industry: 電腦及週邊/系統代工
+  - code: "2382"
+    name: 廣達
+    market: tse
+    industry: 電腦及週邊/系統代工
+  - code: "3231"
+    name: 緯創
+    market: tse
+    industry: 電腦及週邊/系統代工
+  - code: "3706"
+    name: 神達
+    market: tse
+    industry: 電腦及週邊/系統代工
+
+  # 品牌
+  - code: "2376"
+    name: 技嘉
+    market: tse
+    industry: 電腦及週邊/品牌
+  - code: "3515"
+    name: 華擎
+    market: tse
+    industry: 電腦及週邊/品牌
+  - code: "2425"
+    name: 承啟
+    market: tse
+    industry: 電腦及週邊/品牌
+
+  # 系統整合、通路
+  - code: "3147"
+    name: 大綜
+    market: otc
+    industry: 電腦及週邊/系統整合、通路
+  - code: "6140"
+    name: 訊達
+    market: otc
+    industry: 電腦及週邊/系統整合、通路
+  - code: "6218"
+    name: 豪勉
+    market: otc
+    industry: 電腦及週邊/系統整合、通路
+  - code: "6221"
+    name: 晉泰
+    market: otc
+    industry: 電腦及週邊/系統整合、通路
+  - code: "8099"
+    name: 大世科
+    market: otc
+    industry: 電腦及週邊/系統整合、通路
+
+  # ===== 散熱 =====
+  # 散熱模組
+  - code: "3017"
+    name: 奇鋐
+    market: tse
+    industry: 散熱/散熱模組
+  - code: "3324"
+    name: 雙鴻
+    market: otc
+    industry: 散熱/散熱模組
+  - code: "3653"
+    name: 健策
+    market: tse
+    industry: 散熱/散熱模組
+  - code: "3483"
+    name: 力致
+    market: otc
+    industry: 散熱/散熱模組
+
+  # 風扇
+  - code: "2421"
+    name: 建準
+    market: tse
+    industry: 散熱/風扇
+
+  # 熱交換器
+  - code: "8996"
+    name: 高力
+    market: tse
+    industry: 散熱/熱交換器
+
+  # ===== 機構件 =====
+  # 機殼
+  - code: "8210"
+    name: 勤誠
+    market: tse
+    industry: 機構件/機殼
+  - code: "3013"
+    name: 晟銘電
+    market: tse
+    industry: 機構件/機殼
+  - code: "3693"
+    name: 營邦
+    market: otc
+    industry: 機構件/機殼
+
+  # 轉軸
+  - code: "6805"
+    name: 富世達
+    market: tse
+    industry: 機構件/轉軸
+
+  # ===== 電源 =====
+  # 電源供應器
+  - code: "2308"
+    name: 台達電
+    market: tse
+    industry: 電源/電源供應器
+  - code: "2301"
+    name: 光寶科
+    market: tse
+    industry: 電源/電源供應器
+  - code: "6282"
+    name: 康舒
+    market: tse
+    industry: 電源/電源供應器
+  - code: "6412"
+    name: 群電
+    market: tse
+    industry: 電源/電源供應器
+
+  # 電池
+  - code: "3211"
+    name: 順達
+    market: otc
+    industry: 電源/電池
+  - code: "4931"
+    name: 新盛力
+    market: otc
+    industry: 電源/電池
+
+  # ===== 連接器 =====
+  # 連接器
+  - code: "3533"
+    name: 嘉澤
+    market: tse
+    industry: 連接器/連接器
+  - code: "5457"
+    name: 宣德
+    market: otc
+    industry: 連接器/連接器
+
+  # 線材
+  - code: "3665"
+    name: 貿聯-KY
+    market: tse
+    industry: 連接器/線材
