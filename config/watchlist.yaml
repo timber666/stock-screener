@@ -9,7 +9,9 @@
 #   AI 伺服器概念股清單（另補清單遺漏的電源、電池、散熱、機殼、連接器廠）：同上，
 #   並先排除半導體設備、檢測、封測、材料類股（另開產業）
 #   PC及消費電子：AI 伺服器清單中伺服器占比低的 PC、消費電子廠移入
-#   半導體製造、光學、網通：重新分類時由上述清單移入
+#   半導體：網路搜尋製造、設備、檢測、封測、材料各子產業個股，標準同上；
+#   成交量 < 500 張但成交金額 ≥ 1 億元（股價高所致）者保留
+#   光學、網通：重新分類時由上述清單移入
 
 industries:                  # 族群 → 子分類；順序決定顯示順序（產業鏈依上游到下游）
   PCB: [材料, 玻璃纖維、玻纖布, 設備、耗材, 銅箔基板, PCB製造]
@@ -17,7 +19,7 @@ industries:                  # 族群 → 子分類；順序決定顯示順序�
   被動元件: [電感器材料, 電容器材料, 電阻器材料, 電阻器, 電容器, 電感器, 濾波器、振盪器]
   光通訊: [磊晶、晶圓代工, 光元件、光收發模組]
   IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 功率元件, 消費性IC, 其他]
-  半導體製造: [設備, 晶圓代工, 封測]
+  半導體: [製造, 設備, 檢測, 封測, 材料]
   光學: [光學材料, 光學鏡頭]
   網通: [交換器, 寬頻設備, 系統整合、電信服務]
   伺服器: [系統代工, 品牌, 系統整合、通路]
@@ -755,28 +757,284 @@ stocks:
     market: tse
     industry: IC設計/其他
 
-  # ===== 半導體製造 =====
-  # 設備
-  - code: "3455"
-    name: 由田
-    market: otc
-    industry: 半導體製造/設備
-
-  # 晶圓代工
+  # ===== 半導體 =====
+  # 製造
   - code: "6770"
     name: 力積電
     market: tse
-    industry: 半導體製造/晶圓代工
+    industry: 半導體/製造
   - code: "2330"
     name: 台積電
     market: tse
-    industry: 半導體製造/晶圓代工
+    industry: 半導體/製造
+  - code: "2303"
+    name: 聯電
+    market: tse
+    industry: 半導體/製造
+  - code: "5347"
+    name: 世界
+    market: otc
+    industry: 半導體/製造
+  - code: "2342"
+    name: 茂矽
+    market: tse
+    industry: 半導體/製造
+  - code: "8086"
+    name: 宏捷科
+    market: otc
+    industry: 半導體/製造
+
+  # 設備
+  - code: "3131"
+    name: 弘塑
+    market: otc
+    industry: 半導體/設備
+  - code: "3583"
+    name: 辛耘
+    market: tse
+    industry: 半導體/設備
+  - code: "6187"
+    name: 萬潤
+    market: otc
+    industry: 半導體/設備
+  - code: "6640"
+    name: 均華
+    market: otc
+    industry: 半導體/設備
+  - code: "3413"
+    name: 京鼎
+    market: tse
+    industry: 半導體/設備
+  - code: "6196"
+    name: 帆宣
+    market: tse
+    industry: 半導體/設備
+  - code: "2404"
+    name: 漢唐
+    market: tse
+    industry: 半導體/設備
+  - code: "6139"
+    name: 亞翔
+    market: tse
+    industry: 半導體/設備
+  - code: "5536"
+    name: 聖暉
+    market: otc
+    industry: 半導體/設備
+  - code: "6691"
+    name: 洋基工程
+    market: tse
+    industry: 半導體/設備
+  - code: "7734"
+    name: 印能科技
+    market: otc
+    industry: 半導體/設備
+  - code: "6788"
+    name: 華景電
+    market: otc
+    industry: 半導體/設備
+  - code: "1595"
+    name: 川寶
+    market: otc
+    industry: 半導體/設備
+  - code: "6706"
+    name: 惠特
+    market: tse
+    industry: 半導體/設備
+  - code: "8027"
+    name: 鈦昇
+    market: otc
+    industry: 半導體/設備
+  - code: "5443"
+    name: 均豪
+    market: otc
+    industry: 半導體/設備
+  - code: "2464"
+    name: 盟立
+    market: tse
+    industry: 半導體/設備
+  - code: "6532"
+    name: 瑞耘
+    market: otc
+    industry: 半導體/設備
+  - code: "3580"
+    name: 友威科
+    market: otc
+    industry: 半導體/設備
+  - code: "6125"
+    name: 廣運
+    market: otc
+    industry: 半導體/設備
+  - code: "3680"
+    name: 家登
+    market: otc
+    industry: 半導體/設備
+
+  # 檢測
+  - code: "3455"
+    name: 由田
+    market: otc
+    industry: 半導體/檢測
+  - code: "2360"
+    name: 致茂
+    market: tse
+    industry: 半導體/檢測
+  - code: "6223"
+    name: 旺矽
+    market: otc
+    industry: 半導體/檢測
+  - code: "6515"
+    name: 穎崴
+    market: tse
+    industry: 半導體/檢測
+  - code: "6510"
+    name: 精測
+    market: otc
+    industry: 半導體/檢測
+  - code: "6683"
+    name: 雍智科技
+    market: otc
+    industry: 半導體/檢測
+  - code: "3289"
+    name: 宜特
+    market: otc
+    industry: 半導體/檢測
+  - code: "6830"
+    name: 汎銓
+    market: tse
+    industry: 半導體/檢測
+  - code: "7769"
+    name: 鴻勁
+    market: tse
+    industry: 半導體/檢測
 
   # 封測
   - code: "3450"
     name: 聯鈞
     market: tse
-    industry: 半導體製造/封測
+    industry: 半導體/封測
+  - code: "3711"
+    name: 日月光投控
+    market: tse
+    industry: 半導體/封測
+  - code: "2449"
+    name: 京元電子
+    market: tse
+    industry: 半導體/封測
+  - code: "6239"
+    name: 力成
+    market: tse
+    industry: 半導體/封測
+  - code: "8150"
+    name: 南茂
+    market: tse
+    industry: 半導體/封測
+  - code: "6147"
+    name: 頎邦
+    market: otc
+    industry: 半導體/封測
+  - code: "3264"
+    name: 欣銓
+    market: otc
+    industry: 半導體/封測
+  - code: "6257"
+    name: 矽格
+    market: tse
+    industry: 半導體/封測
+  - code: "2441"
+    name: 超豐
+    market: tse
+    industry: 半導體/封測
+  - code: "2369"
+    name: 菱生
+    market: tse
+    industry: 半導體/封測
+  - code: "3374"
+    name: 精材
+    market: otc
+    industry: 半導體/封測
+  - code: "6271"
+    name: 同欣電
+    market: tse
+    industry: 半導體/封測
+  - code: "3265"
+    name: 台星科
+    market: otc
+    industry: 半導體/封測
+  - code: "2329"
+    name: 華泰
+    market: tse
+    industry: 半導體/封測
+
+  # 材料
+  - code: "6488"
+    name: 環球晶
+    market: otc
+    industry: 半導體/材料
+  - code: "5483"
+    name: 中美晶
+    market: otc
+    industry: 半導體/材料
+  - code: "3532"
+    name: 台勝科
+    market: tse
+    industry: 半導體/材料
+  - code: "6182"
+    name: 合晶
+    market: otc
+    industry: 半導體/材料
+  - code: "3016"
+    name: 嘉晶
+    market: tse
+    industry: 半導體/材料
+  - code: "3707"
+    name: 漢磊
+    market: otc
+    industry: 半導體/材料
+  - code: "8028"
+    name: 昇陽半導體
+    market: tse
+    industry: 半導體/材料
+  - code: "4749"
+    name: 新應材
+    market: otc
+    industry: 半導體/材料
+  - code: "4772"
+    name: 台特化
+    market: otc
+    industry: 半導體/材料
+  - code: "5434"
+    name: 崇越
+    market: tse
+    industry: 半導體/材料
+  - code: "1560"
+    name: 中砂
+    market: tse
+    industry: 半導體/材料
+  - code: "3010"
+    name: 華立
+    market: tse
+    industry: 半導體/材料
+  - code: "1773"
+    name: 勝一
+    market: tse
+    industry: 半導體/材料
+  - code: "3305"
+    name: 昇貿
+    market: tse
+    industry: 半導體/材料
+  - code: "5285"
+    name: 界霖
+    market: tse
+    industry: 半導體/材料
+  - code: "4768"
+    name: 晶呈科技
+    market: otc
+    industry: 半導體/材料
+  - code: "1785"
+    name: 光洋科
+    market: otc
+    industry: 半導體/材料
 
   # ===== 光學 =====
   # 光學材料
