@@ -8,6 +8,7 @@
 #   營收與該產業無關，以及與前面清單重複者
 #   AI 伺服器概念股清單（另補清單遺漏的電源、電池、散熱、機殼、連接器廠）：同上，
 #   並先排除半導體設備、檢測、封測、材料類股（另開產業）
+#   PC及消費電子：AI 伺服器清單中伺服器占比低的 PC、消費電子廠移入
 #   半導體製造、光學、網通：重新分類時由上述清單移入
 
 industries:                  # 族群 → 子分類；順序決定顯示順序（產業鏈依上游到下游）
@@ -19,9 +20,10 @@ industries:                  # 族群 → 子分類；順序決定顯示順序�
   半導體製造: [設備, 晶圓代工, 封測]
   光學: [光學材料, 光學鏡頭]
   網通: [交換器, 寬頻設備, 系統整合、電信服務]
-  電腦及週邊: [系統代工, 品牌, 系統整合、通路]
+  伺服器: [系統代工, 品牌, 系統整合、通路]
+  PC及消費電子: [品牌, 代工]
   散熱: [散熱模組, 風扇, 熱交換器]
-  機構件: [機殼, 轉軸]
+  機構件: [滑軌, 機殼, 轉軸]
   電源: [電源供應器, 電池]
   連接器: [連接器, 線材]
 
@@ -840,68 +842,101 @@ stocks:
     market: otc
     industry: 網通/系統整合、電信服務
 
-  # ===== 電腦及週邊 =====
+  # ===== 伺服器 =====
   # 系統代工
   - code: "2317"
     name: 鴻海
     market: tse
-    industry: 電腦及週邊/系統代工
+    industry: 伺服器/系統代工
   - code: "6669"
     name: 緯穎
     market: tse
-    industry: 電腦及週邊/系統代工
+    industry: 伺服器/系統代工
   - code: "2356"
     name: 英業達
     market: tse
-    industry: 電腦及週邊/系統代工
+    industry: 伺服器/系統代工
   - code: "2382"
     name: 廣達
     market: tse
-    industry: 電腦及週邊/系統代工
+    industry: 伺服器/系統代工
   - code: "3231"
     name: 緯創
     market: tse
-    industry: 電腦及週邊/系統代工
+    industry: 伺服器/系統代工
   - code: "3706"
     name: 神達
     market: tse
-    industry: 電腦及週邊/系統代工
+    industry: 伺服器/系統代工
 
   # 品牌
   - code: "2376"
     name: 技嘉
     market: tse
-    industry: 電腦及週邊/品牌
-  - code: "3515"
-    name: 華擎
+    industry: 伺服器/品牌
+  - code: "7711"
+    name: 永擎
     market: tse
-    industry: 電腦及週邊/品牌
-  - code: "2425"
-    name: 承啟
-    market: tse
-    industry: 電腦及週邊/品牌
+    industry: 伺服器/品牌
 
   # 系統整合、通路
   - code: "3147"
     name: 大綜
     market: otc
-    industry: 電腦及週邊/系統整合、通路
+    industry: 伺服器/系統整合、通路
   - code: "6140"
     name: 訊達
     market: otc
-    industry: 電腦及週邊/系統整合、通路
+    industry: 伺服器/系統整合、通路
   - code: "6218"
     name: 豪勉
     market: otc
-    industry: 電腦及週邊/系統整合、通路
+    industry: 伺服器/系統整合、通路
   - code: "6221"
     name: 晉泰
     market: otc
-    industry: 電腦及週邊/系統整合、通路
+    industry: 伺服器/系統整合、通路
   - code: "8099"
     name: 大世科
     market: otc
-    industry: 電腦及週邊/系統整合、通路
+    industry: 伺服器/系統整合、通路
+
+  # ===== PC及消費電子 =====
+  # 品牌
+  - code: "3515"
+    name: 華擎
+    market: tse
+    industry: PC及消費電子/品牌
+  - code: "2425"
+    name: 承啟
+    market: tse
+    industry: PC及消費電子/品牌
+  - code: "2357"
+    name: 華碩
+    market: tse
+    industry: PC及消費電子/品牌
+  - code: "2353"
+    name: 宏碁
+    market: tse
+    industry: PC及消費電子/品牌
+  - code: "2377"
+    name: 微星
+    market: tse
+    industry: PC及消費電子/品牌
+  - code: "2352"
+    name: 佳世達
+    market: tse
+    industry: PC及消費電子/品牌
+
+  # 代工
+  - code: "2324"
+    name: 仁寶
+    market: tse
+    industry: PC及消費電子/代工
+  - code: "4938"
+    name: 和碩
+    market: tse
+    industry: PC及消費電子/代工
 
   # ===== 散熱 =====
   # 散熱模組
@@ -921,6 +956,10 @@ stocks:
     name: 力致
     market: otc
     industry: 散熱/散熱模組
+  - code: "6831"
+    name: 邁科
+    market: tse
+    industry: 散熱/散熱模組
 
   # 風扇
   - code: "2421"
@@ -935,6 +974,16 @@ stocks:
     industry: 散熱/熱交換器
 
   # ===== 機構件 =====
+  # 滑軌
+  - code: "2059"
+    name: 川湖
+    market: tse
+    industry: 機構件/滑軌
+  - code: "6584"
+    name: 南俊國際
+    market: otc
+    industry: 機構件/滑軌
+
   # 機殼
   - code: "8210"
     name: 勤誠
@@ -947,6 +996,10 @@ stocks:
   - code: "3693"
     name: 營邦
     market: otc
+    industry: 機構件/機殼
+  - code: "2474"
+    name: 可成
+    market: tse
     industry: 機構件/機殼
 
   # 轉軸
@@ -982,6 +1035,10 @@ stocks:
   - code: "4931"
     name: 新盛力
     market: otc
+    industry: 電源/電池
+  - code: "6781"
+    name: AES-KY
+    market: tse
     industry: 電源/電池
 
   # ===== 連接器 =====
