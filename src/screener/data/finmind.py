@@ -9,7 +9,7 @@
 
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -17,6 +17,7 @@ import requests
 
 from screener.config import FinMindSettings
 from screener.data.base import DataSourceError
+from screener.data.http import HttpClient, RetryableError
 from screener.models import DailyBar
 
 logger = logging.getLogger(__name__)
@@ -40,63 +41,27 @@ class FinMindClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._settings = settings
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
-        self._session = session or requests.Session()
-        self._sleep = sleep
-        self._clock = clock
-        self._last_request_at: float | None = None
+        self._http = HttpClient(settings, session=session, sleep=sleep, clock=clock)
 
     def fetch_daily_prices(self, code: str, start: date, end: date) -> list[DailyBar]:
-        rows = self._get({
+        params = {
             "dataset": DATASET,
             "data_id": code,
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
-        })
+        }
+        rows = self._http.get(API_URL, params, _read_data, label=f"FinMind {DATASET} {code}",
+                              headers=self._headers)
         bars = [_parse_row(code, row) for row in rows]
         return [bar for bar in bars if bar is not None]
 
-    def _get(self, params: Mapping[str, str]) -> list[Any]:
-        """送出請求並回傳 `data`。連線失敗、逾時、伺服器錯誤會重試；其他錯誤直接拋出。"""
-        label = f"{params['dataset']} {params['data_id']}"
-        attempts = self._settings.retry + 1
-        for attempt in range(1, attempts + 1):
-            self._throttle()
-            try:
-                response = self._session.get(
-                    API_URL, params=params, headers=self._headers, timeout=self._settings.timeout_sec
-                )
-                return _read_data(response)
-            except (requests.ConnectionError, requests.Timeout) as exc:
-                error = f"連線失敗：{exc}"
-            except _RetryableError as exc:
-                error = str(exc)
-
-            if attempt < attempts:
-                wait = self._settings.retry_backoff_sec * attempt
-                logger.warning("FinMind %s 請求失敗（%s），%g 秒後重試（%d/%d）",
-                               label, error, wait, attempt, self._settings.retry)
-                self._sleep(wait)
-        raise DataSourceError(f"FinMind {label} 請求失敗，已重試 {self._settings.retry} 次：{error}")
-
-    def _throttle(self) -> None:
-        if self._last_request_at is not None:
-            wait = self._last_request_at + self._settings.request_interval_sec - self._clock()
-            if wait > 0:
-                self._sleep(wait)
-        self._last_request_at = self._clock()
-
-
-class _RetryableError(Exception):
-    """暫時性錯誤（伺服器錯誤、回應不完整），重試可能會成功。"""
-
 
 def _read_data(response: requests.Response) -> list[Any]:
-    """取出回應的 `data`。暫時性錯誤拋出 _RetryableError，其餘錯誤拋出 DataSourceError。"""
+    """取出回應的 `data`。暫時性錯誤拋出 RetryableError，其餘錯誤拋出 DataSourceError。"""
     status = response.status_code
     if status >= 500:
-        raise _RetryableError(f"HTTP {status}")
+        raise RetryableError(f"HTTP {status}")
     try:
         body = response.json()
     except ValueError:
@@ -108,7 +73,7 @@ def _read_data(response: requests.Response) -> list[Any]:
     if status != 200:
         raise DataSourceError(f"FinMind 拒絕請求（HTTP {status}：{message}）")
     if body is None:
-        raise _RetryableError("回應不是 JSON")
+        raise RetryableError("回應不是 JSON")
     if not isinstance(body, dict) or body.get("status") != 200 or not isinstance(body.get("data"), list):
         raise DataSourceError(f"FinMind 回應格式不符：{str(body)[:200]}")
     return body["data"]

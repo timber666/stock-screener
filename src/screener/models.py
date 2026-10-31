@@ -84,12 +84,39 @@ class DailyBar:
 
 
 @dataclass(frozen=True)
+class Quote:
+    """盤中即時報價（MIS 快照，PROJECT_PLAN.md 8.2）。MIS 沒有值（"-"）的欄位為 None。"""
+
+    code: str
+    date: date                      # 資料日期；非交易日為最後一個交易日
+    open: float | None              # None：今日尚無成交
+    high: float | None
+    low: float | None
+    last: float | None              # 最新成交價；None：該時點沒有成交
+    prev_close: float | None        # 參考價（昨收；除權息日為除權息參考價）
+    volume: int | None              # 累積成交量（張），只含一般交易
+    best_bid: float | None          # 最佳買價第一檔；跌停鎖死時沒有買單
+    best_ask: float | None          # 最佳賣價第一檔；漲停鎖死時沒有賣單
+
+
+class PriceSubstitute(str, Enum):
+    """盤中沒有成交價時，現價的替代來源（PROJECT_PLAN.md 8.2）。"""
+
+    BEST_BID = "best_bid"
+    BEST_ASK = "best_ask"
+
+    @property
+    def label(self) -> str:
+        return "最佳買價" if self is PriceSubstitute.BEST_BID else "最佳賣價"
+
+
+@dataclass(frozen=True)
 class Signal:
     """一條進場規則的觸發結果。"""
 
     rule_id: str
     rule_name: str
-    detail: str                     # 例："量比 1.8x，突破 40 日高 123.5"
+    detail: str                     # 例："量比 1.80x，突破 40 日高 123.5"
     side: Side
 
 
@@ -129,6 +156,7 @@ class Hit:
     side: Side
     signals: tuple[Signal, ...]
     change_pct: float | None        # 漲跌幅（%）；回放以前一日收盤計算，盤中以 MIS 參考價計算
+    price_substitute: PriceSubstitute | None = None     # 盤中沒有成交價時現價的替代來源（8.2）
 
 
 @dataclass(frozen=True)
@@ -141,3 +169,4 @@ class ScanReport:
     hits: tuple[Hit, ...]
     not_evaluated: tuple[str, ...]  # 當日沒有 K 棒（回放）或無成交、無報價（盤中）而未評估的代號
     scan_time: str | None = None    # 盤中掃描時間，例 "13:10"；回放為 None
+    prev_close_mismatch: tuple[str, ...] = ()   # MIS 參考價與資料庫昨收不一致的代號（盤中，7.2）

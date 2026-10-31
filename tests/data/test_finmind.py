@@ -1,4 +1,3 @@
-import json
 import logging
 from datetime import date
 from typing import Any
@@ -6,6 +5,7 @@ from typing import Any
 import pytest
 import requests
 
+from conftest import FakeResponse, FakeSession, FakeTime
 from screener.config import FinMindSettings
 from screener.data.base import DataSourceError
 from screener.data.finmind import API_URL, FinMindClient
@@ -26,50 +26,8 @@ def row(day: str = "2026-10-30", stock_id: str = "2330", **overrides: Any) -> di
     return data
 
 
-class FakeResponse:
-    def __init__(self, status_code: int = 200, body: Any = None, text: str | None = None) -> None:
-        self.status_code = status_code
-        self._body = body
-        self.text = json.dumps(body) if text is None else text
-
-    def json(self) -> Any:
-        if self._body is None:
-            raise ValueError("not JSON")
-        return self._body
-
-
 def ok(*rows: dict[str, Any]) -> FakeResponse:
     return FakeResponse(200, {"msg": "success", "status": 200, "data": list(rows)})
-
-
-class FakeSession:
-    """依序回傳預先設定的回應；元素為例外時改為拋出。"""
-
-    def __init__(self, *outcomes: FakeResponse | Exception) -> None:
-        self.outcomes = list(outcomes)
-        self.calls: list[dict[str, Any]] = []
-
-    def get(self, url: str, **kwargs: Any) -> FakeResponse:
-        self.calls.append({"url": url, **kwargs})
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
-
-
-class FakeTime:
-    """假的時鐘：sleep 只記錄並推進時間，不真的等待。"""
-
-    def __init__(self) -> None:
-        self.now = 1000.0
-        self.sleeps: list[float] = []
-
-    def sleep(self, seconds: float) -> None:
-        self.sleeps.append(seconds)
-        self.now += seconds
-
-    def clock(self) -> float:
-        return self.now
 
 
 def make_client(session: FakeSession, timer: FakeTime | None = None,

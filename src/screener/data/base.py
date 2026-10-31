@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Protocol
 
-from screener.models import DailyBar
+from screener.models import DailyBar, Quote, StockInfo
 
 
 class DataSourceError(Exception):
@@ -17,6 +17,12 @@ class DataSourceError(Exception):
 class DailyPriceSource(Protocol):
     def fetch_daily_prices(self, code: str, start: date, end: date) -> list[DailyBar]:
         """取得 start 到 end（含）的日 K；沒有成交的日子不會有資料。"""
+        ...
+
+
+class QuoteSource(Protocol):
+    def fetch_quotes(self, stocks: Sequence[StockInfo]) -> dict[str, Quote]:
+        """取得即時報價，key 為代號；查無報價的股票不在結果中。"""
         ...
 
 

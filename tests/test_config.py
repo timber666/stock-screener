@@ -40,6 +40,8 @@ def test_repo_config_loads() -> None:
     config = load_config(REPO_CONFIG_DIR)
 
     assert config.settings.mis.request_interval_sec == 3.0
+    assert config.settings.mis.batch_size == 50
+    assert config.settings.mis.missing_price_retry == 1
     assert config.settings.finmind.timeout_sec == 30.0
     assert config.rules.trend.pivot_ma == 5
     assert [r.id for r in config.rules.entry_rules] == [
@@ -166,10 +168,27 @@ def test_non_positive_backfill_days_is_rejected(config_dir: Path) -> None:
         ("request_interval_sec", "1", "request_interval_sec：應為數字"),
     ],
 )
-def test_invalid_finmind_setting_is_rejected(config_dir: Path, key: str, value: Any, message: str) -> None:
-    edit_yaml(config_dir / "settings.yaml", lambda d: d["finmind"].update({key: value}))
+@pytest.mark.parametrize("section", ["finmind", "mis"])
+def test_invalid_request_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
+                                             message: str) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d[section].update({key: value}))
 
-    with pytest.raises(ConfigError, match=f"finmind > {message}"):
+    with pytest.raises(ConfigError, match=f"{section} > {message}"):
+        load_config(config_dir)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("batch_size", 0, "batch_size：必須大於 0"),
+        ("missing_price_retry", -1, "missing_price_retry：不可為負數"),
+        ("missing_price_wait_sec", -1, "missing_price_wait_sec：不可為負數"),
+    ],
+)
+def test_invalid_mis_setting_is_rejected(config_dir: Path, key: str, value: Any, message: str) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d["mis"].update({key: value}))
+
+    with pytest.raises(ConfigError, match=f"mis > {message}"):
         load_config(config_dir)
 
 

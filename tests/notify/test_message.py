@@ -3,7 +3,7 @@
 from datetime import date
 
 from conftest import make_bars, make_context
-from screener.models import Hit, Market, ScanReport, Side, Signal, StockInfo, Trend
+from screener.models import Hit, Market, PriceSubstitute, ScanReport, Side, Signal, StockInfo, Trend
 from screener.notify.message import format_report
 
 INDUSTRIES = {"PCB": ("銅箔基板", "PCB製造"), "記憶體": (), "半導體": ("製造", "封測")}
@@ -12,17 +12,18 @@ DAY = date(2026, 10, 30)
 
 def hit(code: str, group: str, subcategory: str | None, *rule_names: str, close: float = 123.5,
         change: float | None = 3.2, trend: Trend = Trend.BULL, themes: tuple[str, ...] = (),
-        side: Side = Side.LONG) -> Hit:
+        side: Side = Side.LONG, substitute: PriceSubstitute | None = None) -> Hit:
     info = StockInfo(code=code, name=f"股{code}", market=Market.TSE, group=group, subcategory=subcategory,
                      themes=themes)
     ctx = make_context(make_bars([100.0, close]), trend=trend, info=info)
     signals = tuple(Signal("id", name, "detail", side) for name in rule_names)
-    return Hit(ctx=ctx, side=side, signals=signals, change_pct=change)
+    return Hit(ctx=ctx, side=side, signals=signals, change_pct=change, price_substitute=substitute)
 
 
-def report(*hits: Hit, not_evaluated: tuple[str, ...] = (), is_replay: bool = True) -> ScanReport:
+def report(*hits: Hit, not_evaluated: tuple[str, ...] = (), is_replay: bool = True,
+           mismatch: tuple[str, ...] = ()) -> ScanReport:
     return ScanReport(day=DAY, is_replay=is_replay, observed=45, hits=hits, not_evaluated=not_evaluated,
-                      scan_time=None if is_replay else "13:10")
+                      scan_time=None if is_replay else "13:10", prev_close_mismatch=mismatch)
 
 
 def test_hits_are_grouped_by_industry_and_sorted_upstream_first() -> None:
@@ -109,3 +110,25 @@ def test_intraday_header_marks_tentative_bars() -> None:
     text = format_report(report(is_replay=False), INDUSTRIES)
 
     assert text.startswith("【盤中選股】2026-10-30 13:10（暫定 K 棒，收盤前可能變動）")
+
+
+def test_intraday_warnings_are_listed_at_the_bottom() -> None:
+    text = format_report(report(hit("2330", "半導體", "製造", "三線多排"), is_replay=False,
+                                mismatch=("2330", "3037"), not_evaluated=("1111",)), INDUSTRIES)
+
+    assert text.splitlines()[-3:] == [
+        "觀察 45 檔｜觸發 1 檔（多方 1、空方 0）",
+        "⚠️ 昨收不一致（除權息或資料未更新）：2330、3037",
+        "⚠️ 1 檔今日無成交或無報價，未評估：1111",
+    ]
+
+
+def test_substituted_price_is_marked_on_the_hit() -> None:
+    text = format_report(report(
+        hit("2330", "半導體", "製造", "三線多排", themes=("CPO",), substitute=PriceSubstitute.BEST_BID),
+        hit("2308", "半導體", "製造", "空頭跌破五日線黑K", close=1335.0, change=-9.8, trend=Trend.BEAR,
+            side=Side.SHORT, substitute=PriceSubstitute.BEST_ASK),
+        is_replay=False), INDUSTRIES).splitlines()
+
+    assert "2330 股2330  123.5  ▲3.2%｜製造｜多頭｜#CPO｜⚠️ 價格為替代值（最佳買價）" in text
+    assert "2308 股2308  1335  ▼9.8%｜製造｜空頭｜⚠️ 價格為替代值（最佳賣價）" in text

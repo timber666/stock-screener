@@ -125,7 +125,17 @@ def test_e2_triggers_on_long_red_volume_spike_above_prior_high() -> None:
 
     assert signal is not None
     assert signal.rule_name == "盤整長紅爆量過前高"
-    assert signal.detail == "實體 3.0%，量比 1.5x，突破 40 日高 100"
+    assert signal.detail == "實體 3.0%，量比 1.50x，突破 40 日高 100"
+
+
+def test_e2_shows_volume_ratio_to_two_decimals() -> None:
+    # 1462 / 1000 = 1.462：顯示到小數一位會變成 1.5x，看起來像達到 1.5 倍
+    rule = RangeBreakoutVolume({"trends": ["range"], "min_body_pct": 3.0, "volume_ratio": 1.3,
+                                "high_lookback_days": 40})
+
+    signal = rule.evaluate(e2_context(volume=1462))
+
+    assert signal is not None and "量比 1.46x" in signal.detail
 
 
 @pytest.mark.parametrize(

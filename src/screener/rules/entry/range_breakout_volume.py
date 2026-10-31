@@ -31,6 +31,6 @@ class RangeBreakoutVolume(EntryRule):
         if not (is_long_red(ctx, self.min_body_pct) and is_volume_spike(ctx, self.volume_ratio)):
             return None
         return self.signal(
-            f"實體 {body_pct(ctx):.1f}%，量比 {volume_ratio(ctx):.1f}x，"
+            f"實體 {body_pct(ctx):.1f}%，量比 {volume_ratio(ctx):.2f}x，"
             f"突破 {self.high_lookback_days} 日高 {num(high)}"
         )

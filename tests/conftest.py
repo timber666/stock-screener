@@ -1,3 +1,4 @@
+import json
 import shutil
 from collections.abc import Iterator, Sequence
 from datetime import date
@@ -61,6 +62,50 @@ TEST_STOCK = StockInfo(code="2330", name="台積電", market=Market.TSE, group="
 def make_context(bars: pd.DataFrame, trend: Trend = Trend.UNKNOWN, info: StockInfo = TEST_STOCK) -> StockContext:
     """直接建立 StockContext（不計算轉折點），供只看 K 棒與均線的規則測試使用。"""
     return StockContext(info=info, bars=bars, is_tentative=False, pivots=[], trend=trend)
+
+
+# --- HTTP 測試替身（FinMind、MIS 共用）-----------------------------------------
+
+class FakeResponse:
+    def __init__(self, status_code: int = 200, body: Any = None, text: str | None = None) -> None:
+        self.status_code = status_code
+        self._body = body
+        self.text = json.dumps(body) if text is None else text
+
+    def json(self) -> Any:
+        if self._body is None:
+            raise ValueError("not JSON")
+        return self._body
+
+
+class FakeSession:
+    """依序回傳預先設定的回應；元素為例外時改為拋出。"""
+
+    def __init__(self, *outcomes: FakeResponse | Exception) -> None:
+        self.outcomes = list(outcomes)
+        self.calls: list[dict[str, Any]] = []
+
+    def get(self, url: str, **kwargs: Any) -> FakeResponse:
+        self.calls.append({"url": url, **kwargs})
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class FakeTime:
+    """假的時鐘：sleep 只記錄並推進時間，不真的等待。"""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+        self.sleeps: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+    def clock(self) -> float:
+        return self.now
 
 
 def read_yaml(path: Path) -> Any:

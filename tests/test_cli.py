@@ -11,8 +11,8 @@ from conftest import REPO_ROOT, load_fixture, read_yaml, to_bars, write_yaml
 from screener.__main__ import EXIT_CONFIG_ERROR, EXIT_FAILED, EXIT_OK, main
 from screener.data.base import DataSourceError
 from screener.data.db import SqlitePriceStore
-from screener.jobs import daily_update
-from screener.models import DailyBar
+from screener.jobs import daily_update, intraday_scan
+from screener.models import DailyBar, Quote
 
 
 def test_help_runs_as_module() -> None:
@@ -42,11 +42,11 @@ def test_config_error_exits_with_config_error_code(tmp_path: Path) -> None:
     assert main(["--config-dir", str(tmp_path / "missing"), "update"]) == EXIT_CONFIG_ERROR
 
 
-@pytest.mark.parametrize("argv", [["scan", "--dry-run"], ["scan", "--replay", "2026-10-29"]])
-def test_unimplemented_command_fails_and_writes_log(config_dir: Path, argv: list[str]) -> None:
+@pytest.mark.parametrize("argv", [["scan"], ["scan", "--replay", "2026-10-29"]])
+def test_push_without_dry_run_is_not_implemented_yet(config_dir: Path, argv: list[str]) -> None:
     assert main(["--config-dir", str(config_dir), *argv]) == EXIT_FAILED
 
-    assert "尚未實作" in read_log(config_dir)
+    assert "Discord 推播尚未實作（M5）" in read_log(config_dir)
 
 
 # --- update -----------------------------------------------------------------
@@ -208,3 +208,27 @@ def read_log(config_dir: Path) -> str:
     log_text = log_files[0].read_text(encoding="utf-8")
     assert "觀察清單" in log_text
     return log_text
+
+
+# --- scan --dry-run（盤中）---------------------------------------------------
+
+class FakeMisClient:
+    """取代 MisClient：回傳 2026-01-02 的報價，因此今天一定是「非交易日」。"""
+
+    def __init__(self, settings: Any) -> None:
+        pass
+
+    def fetch_quotes(self, stocks: Any) -> dict[str, Quote]:
+        return {stock.code: Quote(stock.code, date(2026, 1, 2), 10.0, 11.0, 9.0, 10.5, 10.0, 100, 10.4, 10.5)
+                for stock in stocks}
+
+
+def test_intraday_dry_run_on_non_trading_day_exits_quietly(
+    config_dir: Path, analysis_db: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(intraday_scan, "MisClient", FakeMisClient)
+
+    assert main(["--config-dir", str(config_dir), "scan", "--dry-run"]) == EXIT_OK
+
+    assert capsys.readouterr().out == ""
+    assert "非交易日，不掃描" in read_log(config_dir)

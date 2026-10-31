@@ -20,7 +20,7 @@ entry_rules:                   # trends: bull | range | bear；空陣列 = 不�
     params: { trends: [bull], ma: 5 }
   - id: range_breakout_volume
     enabled: true
-    params: { trends: [range], min_body_pct: 3.0, volume_ratio: 1.5, high_lookback_days: 40 }
+    params: { trends: [range], min_body_pct: 3.0, volume_ratio: 1.3, high_lookback_days: 40 }
   - id: ma_bull_alignment
     enabled: true
     params: { trends: [], mas: [5, 10, 20], only_on_formation: true }

@@ -21,18 +21,25 @@ class ConfigError(Exception):
 
 
 @dataclass(frozen=True)
-class FinMindSettings:
+class RequestSettings:
+    """HTTP 請求的逾時、重試與間隔，FinMind 與 MIS 共用。"""
+
     timeout_sec: float
-    retry: int
-    retry_backoff_sec: float
-    request_interval_sec: float
+    retry: int                      # 連線失敗、逾時或伺服器錯誤時的重試次數
+    retry_backoff_sec: float        # 第 n 次重試前等待 n × 此秒數
+    request_interval_sec: float     # 兩次請求的最短間隔
 
 
 @dataclass(frozen=True)
-class MisSettings:
-    batch_size: int
-    request_interval_sec: float
-    retry: int
+class FinMindSettings(RequestSettings):
+    pass
+
+
+@dataclass(frozen=True)
+class MisSettings(RequestSettings):
+    batch_size: int                 # 每次請求的股票數
+    missing_price_retry: int        # 成交價為 "-" 時重新查詢的次數（8.2）
+    missing_price_wait_sec: float   # 重新查詢前等待的秒數
 
 
 @dataclass(frozen=True)
@@ -117,29 +124,21 @@ def _load_settings(path: Path) -> Settings:
 
     finmind_where = f"{where} > finmind"
     finmind_data = get_field(data, "finmind", dict, where)
-    check_keys(finmind_data, {"timeout_sec", "retry", "retry_backoff_sec", "request_interval_sec"}, finmind_where)
-    finmind = FinMindSettings(
-        timeout_sec=get_field(finmind_data, "timeout_sec", float, finmind_where),
-        retry=get_field(finmind_data, "retry", int, finmind_where),
-        retry_backoff_sec=get_field(finmind_data, "retry_backoff_sec", float, finmind_where),
-        request_interval_sec=get_field(finmind_data, "request_interval_sec", float, finmind_where),
-    )
-    require(finmind.timeout_sec > 0, f"{finmind_where} > timeout_sec：必須大於 0")
-    require(finmind.retry >= 0, f"{finmind_where} > retry：不可為負數")
-    require(finmind.retry_backoff_sec >= 0, f"{finmind_where} > retry_backoff_sec：不可為負數")
-    require(finmind.request_interval_sec >= 0, f"{finmind_where} > request_interval_sec：不可為負數")
+    check_keys(finmind_data, _REQUEST_KEYS, finmind_where)
+    finmind = FinMindSettings(**_parse_request_settings(finmind_data, finmind_where))
 
     mis_where = f"{where} > mis"
     mis_data = get_field(data, "mis", dict, where)
-    check_keys(mis_data, {"batch_size", "request_interval_sec", "retry"}, mis_where)
+    check_keys(mis_data, _REQUEST_KEYS | {"batch_size", "missing_price_retry", "missing_price_wait_sec"}, mis_where)
     mis = MisSettings(
+        **_parse_request_settings(mis_data, mis_where),
         batch_size=get_field(mis_data, "batch_size", int, mis_where),
-        request_interval_sec=get_field(mis_data, "request_interval_sec", float, mis_where),
-        retry=get_field(mis_data, "retry", int, mis_where),
+        missing_price_retry=get_field(mis_data, "missing_price_retry", int, mis_where),
+        missing_price_wait_sec=get_field(mis_data, "missing_price_wait_sec", float, mis_where),
     )
     require(mis.batch_size > 0, f"{mis_where} > batch_size：必須大於 0")
-    require(mis.request_interval_sec >= 0, f"{mis_where} > request_interval_sec：不可為負數")
-    require(mis.retry >= 0, f"{mis_where} > retry：不可為負數")
+    require(mis.missing_price_retry >= 0, f"{mis_where} > missing_price_retry：不可為負數")
+    require(mis.missing_price_wait_sec >= 0, f"{mis_where} > missing_price_wait_sec：不可為負數")
 
     settings = Settings(
         db_path=Path(get_field(data, "db_path", str, where)),
@@ -150,6 +149,24 @@ def _load_settings(path: Path) -> Settings:
     )
     require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
     return settings
+
+
+_REQUEST_KEYS = {"timeout_sec", "retry", "retry_backoff_sec", "request_interval_sec"}
+
+
+def _parse_request_settings(data: Mapping[str, Any], where: str) -> dict[str, Any]:
+    """讀取 RequestSettings 的欄位，回傳建構參數。"""
+    values = {
+        "timeout_sec": get_field(data, "timeout_sec", float, where),
+        "retry": get_field(data, "retry", int, where),
+        "retry_backoff_sec": get_field(data, "retry_backoff_sec", float, where),
+        "request_interval_sec": get_field(data, "request_interval_sec", float, where),
+    }
+    require(values["timeout_sec"] > 0, f"{where} > timeout_sec：必須大於 0")
+    require(values["retry"] >= 0, f"{where} > retry：不可為負數")
+    require(values["retry_backoff_sec"] >= 0, f"{where} > retry_backoff_sec：不可為負數")
+    require(values["request_interval_sec"] >= 0, f"{where} > request_interval_sec：不可為負數")
+    return values
 
 
 # --- rules.yaml -------------------------------------------------------------

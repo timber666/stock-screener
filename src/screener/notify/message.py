@@ -9,7 +9,7 @@ from screener.models import Hit, ScanReport, Side
 def format_report(report: ScanReport, industries: Mapping[str, tuple[str, ...]]) -> str:
     """先列多方再列空方，各自依族群分組；族群依 industries 的順序，族群內依子分類順序、再依代號排列。
 
-    沒有觸發的方向不列出；兩個方向都沒有觸發時，顯示「今日無符合標的」。
+    沒有觸發的方向不列出；兩個方向都沒有觸發時，顯示「今日無符合標的」。底部彙總昨收不一致與未評估的股票。
     """
     lines = [_header(report), ""]
     for side in Side:
@@ -28,6 +28,8 @@ def format_report(report: ScanReport, industries: Mapping[str, tuple[str, ...]])
     counts = "、".join(f"{side.label} {sum(hit.side is side for hit in report.hits)}" for side in Side)
     triggered = len({hit.ctx.info.code for hit in report.hits})
     lines.append(f"觀察 {report.observed} 檔｜觸發 {triggered} 檔（{counts}）")
+    if report.prev_close_mismatch:
+        lines.append(f"⚠️ 昨收不一致（除權息或資料未更新）：{'、'.join(report.prev_close_mismatch)}")
     if report.not_evaluated:
         reason = "當日沒有日 K（無成交或資料未更新）" if report.is_replay else "今日無成交或無報價"
         lines.append(f"⚠️ {len(report.not_evaluated)} 檔{reason}，未評估：{'、'.join(report.not_evaluated)}")
@@ -59,7 +61,8 @@ def _hit_lines(hit: Hit) -> list[str]:
     quote = f"{info.code} {info.name}  {format_number(hit.ctx.today['close'])}"
     if hit.change_pct is not None:
         quote += f"  {_change(hit.change_pct)}"
-    fields = [quote, info.subcategory, hit.ctx.trend.label, " ".join(f"#{t}" for t in info.themes)]
+    fields = [quote, info.subcategory, hit.ctx.trend.label, " ".join(f"#{t}" for t in info.themes),
+              f"⚠️ 價格為替代值（{hit.price_substitute.label}）" if hit.price_substitute is not None else ""]
     return [
         "｜".join(field for field in fields if field),
         f"  └ {'、'.join(signal.rule_name for signal in hit.signals)}",
