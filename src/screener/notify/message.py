@@ -117,7 +117,7 @@ def _hit_lines(hit: Hit) -> list[str]:
     quote = f"{info.code} {info.name}  {format_number(hit.ctx.today['close'])}"
     if hit.change_pct is not None:
         quote += f"  {_change(hit.change_pct)}"
-    fields = [quote, info.subcategory, hit.ctx.trend.label, " ".join(f"#{t}" for t in info.themes),
+    fields = [quote, info.subcategory, hit.ctx.trend.label,
               f"⚠️ 價格為替代值（{hit.price_substitute.label}）" if hit.price_substitute is not None else ""]
     return [
         "｜".join(field for field in fields if field),

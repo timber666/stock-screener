@@ -10,9 +10,8 @@ from screener.models import Market
 
 BASE_WATCHLIST: dict[str, Any] = {
     "industries": {"PCB": ["CCL", "載板"], "記憶體": []},
-    "themes": ["AI伺服器", "CPO"],
     "stocks": [
-        {"code": "2383", "name": "台光電", "market": "tse", "industry": "PCB/CCL", "themes": ["AI伺服器"]},
+        {"code": "2383", "name": "台光電", "market": "tse", "industry": "PCB/CCL"},
     ],
 }
 
@@ -65,18 +64,13 @@ def test_watchlist_parses_stock(config_dir: Path) -> None:
     assert stock.code == "2383"
     assert stock.market is Market.TSE
     assert (stock.group, stock.subcategory, stock.industry) == ("PCB", "CCL", "PCB/CCL")
-    assert stock.themes == ("AI伺服器",)
     assert config.watchlist.industries["PCB"] == ("CCL", "載板")
 
 
 def test_group_without_subcategories_accepts_group_only(config_dir: Path) -> None:
-    watchlist = with_stock(industry="記憶體")
-    del watchlist["stocks"][0]["themes"]
-
-    stock = load_with_watchlist(config_dir, watchlist).watchlist.stocks[0]
+    stock = load_with_watchlist(config_dir, with_stock(industry="記憶體")).watchlist.stocks[0]
 
     assert (stock.group, stock.subcategory, stock.industry) == ("記憶體", None, "記憶體")
-    assert stock.themes == ()
 
 
 @pytest.mark.parametrize(
@@ -86,15 +80,20 @@ def test_group_without_subcategories_accepts_group_only(config_dir: Path) -> Non
         ({"industry": "PCB/HDI"}, "沒有子分類「HDI」"),
         ({"industry": "PCB"}, "必須寫到子分類"),
         ({"industry": "記憶體/DRAM"}, "未列子分類"),
-        ({"themes": ["AI"]}, "未知的題材「AI」"),
         ({"market": "twse"}, "應為 tse（上市）或 otc（上櫃）"),
         ({"code": 2383}, "請加引號"),
-        ({"theme": ["CPO"]}, "未知的欄位 `theme`"),
+        ({"themes": ["CPO"]}, "未知的欄位 `themes`"),     # 題材已移除（D31）
     ],
 )
 def test_invalid_stock_is_rejected(config_dir: Path, overrides: dict[str, Any], message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         load_with_watchlist(config_dir, with_stock(**overrides))
+
+
+def test_themes_list_is_rejected(config_dir: Path) -> None:
+    # 題材已移除（D31）：舊的設定檔留著 themes 時要報錯，而不是默默忽略
+    with pytest.raises(ConfigError, match="未知的欄位 `themes`"):
+        load_with_watchlist(config_dir, {**BASE_WATCHLIST, "themes": ["CPO"]})
 
 
 def test_missing_stock_field_is_rejected(config_dir: Path) -> None:
@@ -117,7 +116,7 @@ def test_all_stock_errors_are_reported_together(config_dir: Path) -> None:
     watchlist = copy.deepcopy(BASE_WATCHLIST)
     watchlist["stocks"] = [
         {"code": "1111", "name": "甲", "market": "tse", "industry": "PCB/HDI"},
-        {"code": "2222", "name": "乙", "market": "otc", "industry": "PCB/CCL", "themes": ["矽光子"]},
+        {"code": "2222", "name": "乙", "market": "twse", "industry": "PCB/CCL"},
     ]
 
     with pytest.raises(ConfigError) as exc_info:

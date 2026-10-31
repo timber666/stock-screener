@@ -12,10 +12,9 @@ DAY = date(2026, 10, 30)
 
 
 def hit(code: str, group: str, subcategory: str | None, *rule_names: str, close: float = 123.5,
-        change: float | None = 3.2, trend: Trend = Trend.BULL, themes: tuple[str, ...] = (),
-        side: Side = Side.LONG, substitute: PriceSubstitute | None = None) -> Hit:
-    info = StockInfo(code=code, name=f"股{code}", market=Market.TSE, group=group, subcategory=subcategory,
-                     themes=themes)
+        change: float | None = 3.2, trend: Trend = Trend.BULL, side: Side = Side.LONG,
+        substitute: PriceSubstitute | None = None) -> Hit:
+    info = StockInfo(code=code, name=f"股{code}", market=Market.TSE, group=group, subcategory=subcategory)
     ctx = make_context(make_bars([100.0, close]), trend=trend, info=info)
     signals = tuple(Signal("id", name, "detail", side) for name in rule_names)
     return Hit(ctx=ctx, side=side, signals=signals, change_pct=change, price_substitute=substitute)
@@ -31,7 +30,7 @@ def test_hits_are_grouped_by_industry_and_sorted_upstream_first() -> None:
     text = format_report(report(
         hit("2330", "半導體", "製造", "三線多排", trend=Trend.UNKNOWN),
         hit("3037", "PCB", "PCB製造", "多頭突破五日線紅K"),
-        hit("2383", "PCB", "銅箔基板", "多頭突破五日線紅K", "三線多排", themes=("AI伺服器", "CPO")),
+        hit("2383", "PCB", "銅箔基板", "多頭突破五日線紅K", "三線多排"),
         hit("2408", "記憶體", None, "盤整長紅爆量過前高", close=50.0, change=-1.25, trend=Trend.RANGE),
         hit("1000", "PCB", "PCB製造", "三線多排", change=0.04),
     ), INDUSTRIES)
@@ -41,7 +40,7 @@ def test_hits_are_grouped_by_industry_and_sorted_upstream_first() -> None:
         "",
         "━━ 多方 ━━",
         "▍PCB",
-        "2383 股2383  123.5  ▲3.2%｜銅箔基板｜多頭｜#AI伺服器 #CPO",
+        "2383 股2383  123.5  ▲3.2%｜銅箔基板｜多頭",
         "  └ 多頭突破五日線紅K、三線多排",
         "1000 股1000  123.5  0.0%｜PCB製造｜多頭",
         "  └ 三線多排",
@@ -126,12 +125,12 @@ def test_intraday_warnings_are_listed_at_the_bottom() -> None:
 
 def test_substituted_price_is_marked_on_the_hit() -> None:
     text = format_report(report(
-        hit("2330", "半導體", "製造", "三線多排", themes=("CPO",), substitute=PriceSubstitute.BEST_BID),
+        hit("2330", "半導體", "製造", "三線多排", substitute=PriceSubstitute.BEST_BID),
         hit("2308", "半導體", "製造", "空頭跌破五日線黑K", close=1335.0, change=-9.8, trend=Trend.BEAR,
             side=Side.SHORT, substitute=PriceSubstitute.BEST_ASK),
         is_replay=False), INDUSTRIES).splitlines()
 
-    assert "2330 股2330  123.5  ▲3.2%｜製造｜多頭｜#CPO｜⚠️ 價格為替代值（最佳買價）" in text
+    assert "2330 股2330  123.5  ▲3.2%｜製造｜多頭｜⚠️ 價格為替代值（最佳買價）" in text
     assert "2308 股2308  1335  ▼9.8%｜製造｜空頭｜⚠️ 價格為替代值（最佳賣價）" in text
 
 

@@ -83,7 +83,6 @@ class RulesConfig:
 @dataclass(frozen=True)
 class Watchlist:
     industries: dict[str, tuple[str, ...]]     # 族群 → 子分類（上游到下游）
-    themes: tuple[str, ...]
     stocks: tuple[StockInfo, ...]
 
 
@@ -232,13 +231,13 @@ def _parse_rule_list(data: Mapping[str, Any], key: str, where: str) -> tuple[Rul
 
 # --- watchlist.yaml ---------------------------------------------------------
 
-_STOCK_KEYS = {"code", "name", "market", "industry", "themes"}
+_STOCK_KEYS = {"code", "name", "market", "industry"}
 
 
 def _load_watchlist(path: Path) -> Watchlist:
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"industries", "themes", "stocks"}, where)
+    check_keys(data, {"industries", "stocks"}, where)
 
     industries: dict[str, tuple[str, ...]] = {}
     for group, subcategories in get_field(data, "industries", dict, where).items():
@@ -251,17 +250,13 @@ def _load_watchlist(path: Path) -> Watchlist:
         require(len(set(subcategories)) == len(subcategories), f"{group_where}：子分類重複")
         industries[group] = tuple(subcategories)
 
-    themes = get_field(data, "themes", list, where)
-    require(all(isinstance(t, str) for t in themes), f"{where} > themes：應為字串陣列")
-    require(len(set(themes)) == len(themes), f"{where} > themes：題材重複")
-
     # 逐檔驗證並一次列出所有錯誤，方便一次修正
     stocks: list[StockInfo] = []
     errors: list[str] = []
     seen_codes: set[str] = set()
     for i, item in enumerate(get_field(data, "stocks", list, where)):
         try:
-            stock = _parse_stock(item, industries, themes, f"{where} > stocks[{i}]")
+            stock = _parse_stock(item, industries, f"{where} > stocks[{i}]")
         except ConfigError as exc:
             errors.append(str(exc))
             continue
@@ -273,15 +268,10 @@ def _load_watchlist(path: Path) -> Watchlist:
 
     if errors:
         raise ConfigError(f"觀察清單有 {len(errors)} 個錯誤：\n" + "\n".join(f"  - {e}" for e in errors))
-    return Watchlist(industries=industries, themes=tuple(themes), stocks=tuple(stocks))
+    return Watchlist(industries=industries, stocks=tuple(stocks))
 
 
-def _parse_stock(
-    item: Any,
-    industries: Mapping[str, tuple[str, ...]],
-    themes: list[str],
-    where: str,
-) -> StockInfo:
+def _parse_stock(item: Any, industries: Mapping[str, tuple[str, ...]], where: str) -> StockInfo:
     require(isinstance(item, dict), f"{where}：應為 key: value 結構")
     require(
         not isinstance(item.get("code"), int),
@@ -306,21 +296,12 @@ def _parse_stock(
     else:
         require(not subcategory, f"{where} > industry：族群「{group}」未列子分類，只能寫「{group}」")
 
-    stock_themes = item.get("themes", [])
-    require(
-        isinstance(stock_themes, list) and all(isinstance(t, str) for t in stock_themes),
-        f"{where} > themes：應為字串陣列",
-    )
-    for theme in stock_themes:
-        require(theme in themes, f"{where} > themes：未知的題材「{theme}」，請先在 themes 定義")
-
     return StockInfo(
         code=code,
         name=get_field(item, "name", str, where),
         market=market,
         group=group,
         subcategory=subcategory or None,
-        themes=tuple(stock_themes),
     )
 
 

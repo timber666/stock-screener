@@ -62,7 +62,6 @@ class StockInfo:
     market: Market
     group: str                      # 族群，例：PCB
     subcategory: str | None         # 子分類，例：CCL；族群未列子分類時為 None
-    themes: tuple[str, ...] = ()
 
     @property
     def industry(self) -> str:

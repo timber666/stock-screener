@@ -41,12 +41,12 @@ pip install -e ".[dev]"
 
 | 檔案 | 內容 |
 |---|---|
-| `config/watchlist.yaml` | 觀察清單、族群與題材（附範例，請換成自己的清單） |
+| `config/watchlist.yaml` | 觀察清單與族群（附範例，請換成自己的清單） |
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
 | `config/settings.yaml` | 資料庫與 log 路徑、回補天數、FinMind、MIS 與 Discord 的請求頻率、逾時與重試 |
 | `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
-設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類、題材，都會直接報錯並指出位置。
+設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類，都會直接報錯並指出位置。
 
 ## 使用
 
