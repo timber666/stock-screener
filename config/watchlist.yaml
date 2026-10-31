@@ -10,7 +10,7 @@
 #   並先排除半導體設備、檢測、封測、材料類股（另開產業）
 #   PC及消費電子：AI 伺服器清單中伺服器占比低的 PC、消費電子廠移入
 #   半導體：網路搜尋製造、設備、檢測、封測、材料各子產業個股，標準同上；
-#   成交量 < 500 張但成交金額 ≥ 1 億元（股價高所致）者保留
+#   成交量 < 500 張但成交金額 ≥ 1 億元（股價高所致）者保留；矽晶圓另立族群
 #   光學、網通：重新分類時由上述清單移入
 
 industries:                  # 族群 → 子分類；順序決定顯示順序（產業鏈依上游到下游）
@@ -20,6 +20,7 @@ industries:                  # 族群 → 子分類；順序決定顯示順序�
   光通訊: [磊晶、晶圓代工, 光元件、光收發模組]
   IC設計: [矽智財, ASIC設計, 網路通訊IC, 磁碟儲存控制器IC, 輸出入介面IC, 顯示器驅動IC, 影像感測IC, 微控制器IC, 電源管理IC, 功率元件, 消費性IC, 其他]
   半導體: [製造, 設備, 檢測, 封測, 材料]
+  矽晶圓: [矽晶圓, 磊晶, 再生晶圓]
   光學: [光學材料, 光學鏡頭]
   網通: [交換器, 寬頻設備, 系統整合、電信服務]
   伺服器: [系統代工, 品牌, 系統整合、通路]
@@ -967,34 +968,6 @@ stocks:
     industry: 半導體/封測
 
   # 材料
-  - code: "6488"
-    name: 環球晶
-    market: otc
-    industry: 半導體/材料
-  - code: "5483"
-    name: 中美晶
-    market: otc
-    industry: 半導體/材料
-  - code: "3532"
-    name: 台勝科
-    market: tse
-    industry: 半導體/材料
-  - code: "6182"
-    name: 合晶
-    market: otc
-    industry: 半導體/材料
-  - code: "3016"
-    name: 嘉晶
-    market: tse
-    industry: 半導體/材料
-  - code: "3707"
-    name: 漢磊
-    market: otc
-    industry: 半導體/材料
-  - code: "8028"
-    name: 昇陽半導體
-    market: tse
-    industry: 半導體/材料
   - code: "4749"
     name: 新應材
     market: otc
@@ -1005,10 +978,6 @@ stocks:
     industry: 半導體/材料
   - code: "5434"
     name: 崇越
-    market: tse
-    industry: 半導體/材料
-  - code: "1560"
-    name: 中砂
     market: tse
     industry: 半導體/材料
   - code: "3010"
@@ -1035,6 +1004,45 @@ stocks:
     name: 光洋科
     market: otc
     industry: 半導體/材料
+
+  # ===== 矽晶圓 =====
+  # 矽晶圓
+  - code: "6488"
+    name: 環球晶
+    market: otc
+    industry: 矽晶圓/矽晶圓
+  - code: "5483"
+    name: 中美晶
+    market: otc
+    industry: 矽晶圓/矽晶圓
+  - code: "3532"
+    name: 台勝科
+    market: tse
+    industry: 矽晶圓/矽晶圓
+  - code: "6182"
+    name: 合晶
+    market: otc
+    industry: 矽晶圓/矽晶圓
+
+  # 磊晶
+  - code: "3016"
+    name: 嘉晶
+    market: tse
+    industry: 矽晶圓/磊晶
+  - code: "3707"
+    name: 漢磊
+    market: otc
+    industry: 矽晶圓/磊晶
+
+  # 再生晶圓
+  - code: "8028"
+    name: 昇陽半導體
+    market: tse
+    industry: 矽晶圓/再生晶圓
+  - code: "1560"
+    name: 中砂
+    market: tse
+    industry: 矽晶圓/再生晶圓
 
   # ===== 光學 =====
   # 光學材料
