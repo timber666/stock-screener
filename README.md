@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M1（盤後資料），下一步是 M2（均線、轉折點與趨勢判斷）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 🚧 開發中：已完成 M2（均線、轉折點與趨勢判斷），下一步是 M3（規則引擎與選股規則）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 架構
 
@@ -62,6 +62,7 @@ python -m screener --help
 | `python -m screener scan` | 盤中掃描並推播 |
 | `python -m screener scan --dry-run` | 只印在終端，不推播 |
 | `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑，供非交易時段測試與展示 |
+| `python -m screener analyze 2330 2454` | 印出轉折點、基本趨勢與破位修正後的趨勢，供檢查分析結果；`--date` 指定「今日」 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`。
 

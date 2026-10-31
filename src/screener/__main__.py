@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from screener.config import ConfigError, load_config, load_secrets
-from screener.jobs import JobFailed, daily_update, intraday_scan
+from screener.jobs import JobFailed, analyze, daily_update, intraday_scan
 from screener.logging_setup import setup_logging
 
 logger = logging.getLogger("screener.cli")     # 以 -m 執行時 __name__ 是 "__main__"
@@ -52,6 +52,19 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="YYYY-MM-DD",
         help="以該日日 K 當作「今日」重跑，供非交易時段測試與展示；可與 --dry-run 併用",
     )
+
+    analyze_parser = commands.add_parser(
+        "analyze",
+        help="輸出指定股票的轉折點與趨勢",
+        description="以資料庫的日 K 計算轉折點與趨勢並印出，供檢查分析結果。",
+    )
+    analyze_parser.add_argument("codes", nargs="+", metavar="CODE", help="股票代號，可多個")
+    analyze_parser.add_argument(
+        "--date",
+        type=_parse_date,
+        metavar="YYYY-MM-DD",
+        help="以該日日 K 當作「今日」（預設為資料庫最後一筆）",
+    )
     return parser
 
 
@@ -77,6 +90,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "update":
             daily_update.run(config, load_secrets(ENV_FILE))
+        elif args.command == "analyze":
+            analyze.run(config, args.codes, as_of=args.date)
         else:
             intraday_scan.run(config, dry_run=args.dry_run, replay=args.replay)
     except (JobFailed, NotImplementedError) as exc:

@@ -1,8 +1,10 @@
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 import requests
 import yaml
@@ -11,6 +13,37 @@ from screener.logging_setup import reset_logging
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_CONFIG_DIR = REPO_ROOT / "config"
+
+
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+def load_fixture(name: str) -> pd.DataFrame:
+    """讀取 tests/fixtures/<name>.csv 的手工 K 棒資料（含說明用的額外欄位），索引為日期。"""
+    frame = pd.read_csv(FIXTURES_DIR / f"{name}.csv", comment="#", dtype={"date": str})
+    frame.index = pd.Index([date.fromisoformat(d) for d in frame.pop("date")], name="date")
+    return frame
+
+
+def to_bars(frame: pd.DataFrame, default_volume: int = 1000) -> pd.DataFrame:
+    """取出 K 棒欄位；沒有開高低時等於收盤，沒有成交量時為 default_volume 張。"""
+    close = frame["close"].astype(float)
+    return pd.DataFrame(
+        {
+            "open": frame.get("open", close).astype(float),
+            "high": frame.get("high", close).astype(float),
+            "low": frame.get("low", close).astype(float),
+            "close": close,
+            "volume": frame.get("volume", pd.Series(default_volume, index=frame.index)).astype(int),
+        },
+        index=frame.index,
+    )
+
+
+def make_bars(closes: Sequence[float], start: date = date(2026, 1, 5)) -> pd.DataFrame:
+    """以收盤價建立 start 起連續平日的 K 棒（開高低等於收盤）。"""
+    index = pd.Index(pd.bdate_range(start, periods=len(closes)).date, name="date")
+    return to_bars(pd.DataFrame({"close": closes}, index=index))
 
 
 def read_yaml(path: Path) -> Any:
