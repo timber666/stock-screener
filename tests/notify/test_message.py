@@ -1,10 +1,11 @@
 """推播訊息格式（PROJECT_PLAN.md 第 11 節）。"""
 
 from datetime import date
+from pathlib import Path
 
 from conftest import make_bars, make_context
 from screener.models import Hit, Market, PriceSubstitute, ScanReport, Side, Signal, StockInfo, Trend
-from screener.notify.message import format_report
+from screener.notify.message import format_failure, format_messages, format_report, text_length
 
 INDUSTRIES = {"PCB": ("銅箔基板", "PCB製造"), "記憶體": (), "半導體": ("製造", "封測")}
 DAY = date(2026, 10, 30)
@@ -132,3 +133,108 @@ def test_substituted_price_is_marked_on_the_hit() -> None:
 
     assert "2330 股2330  123.5  ▲3.2%｜製造｜多頭｜#CPO｜⚠️ 價格為替代值（最佳買價）" in text
     assert "2308 股2308  1335  ▼9.8%｜製造｜空頭｜⚠️ 價格為替代值（最佳賣價）" in text
+
+
+# --- 拆成多則（Discord 單則上限）----------------------------------------------
+
+def pcb(code: str, side: Side = Side.LONG) -> Hit:
+    return hit(code, "PCB", "銅箔基板", "三線多排", side=side)
+
+
+def mem(code: str, side: Side = Side.LONG) -> Hit:
+    return hit(code, "記憶體", None, "三線多排", side=side)
+
+
+def lines_of(*hits: Hit) -> list[str]:
+    """這幾檔在訊息中的行（每檔兩行）。"""
+    return [line for h in hits for line in format_report(report(h), INDUSTRIES).splitlines()[4:6]]
+
+
+TITLE = ["【回放】2026-10-30（以收盤 K 棒計算）", ""]
+
+
+def test_short_report_is_a_single_message() -> None:
+    r = report(pcb("1001"), mem("2001"))
+
+    assert format_messages(r, INDUSTRIES, 2000) == [format_report(r, INDUSTRIES)]
+
+
+def test_messages_are_split_between_groups() -> None:
+    r = report(pcb("1001"), pcb("1002"), mem("2001"))
+    first = "\n".join([*TITLE, "━━ 多方 ━━", "▍PCB", *lines_of(pcb("1001"), pcb("1002"))])
+
+    messages = format_messages(r, INDUSTRIES, text_length(first) + 5)       # 放不下下一個族群
+
+    assert messages == [first, "\n".join([
+        "━━ 多方 ━━（續）", "▍記憶體", *lines_of(mem("2001")), "", "觀察 45 檔｜觸發 3 檔（多方 3、空方 0）",
+    ])]
+
+
+def test_new_side_starts_without_continuation_marker() -> None:
+    r = report(pcb("1001"), pcb("1002"), pcb("3001", Side.SHORT))
+    first = "\n".join([*TITLE, "━━ 多方 ━━", "▍PCB", *lines_of(pcb("1001"), pcb("1002"))])
+
+    messages = format_messages(r, INDUSTRIES, text_length(first) + 5)
+
+    assert messages[0] == first
+    assert messages[1].startswith("━━ 空方 ━━\n▍PCB\n3001 ")
+
+
+def test_group_larger_than_limit_is_split_between_stocks() -> None:
+    r = report(pcb("1001"), pcb("1002"), pcb("1003"))
+    first = "\n".join([*TITLE, "━━ 多方 ━━", "▍PCB", *lines_of(pcb("1001"))])
+
+    messages = format_messages(r, INDUSTRIES, text_length(first) + 5)
+
+    assert messages[0] == first
+    assert messages[1] == "\n".join(["━━ 多方 ━━（續）", "▍PCB（續）", *lines_of(pcb("1002"))])
+    assert messages[2].startswith("\n".join(["━━ 多方 ━━（續）", "▍PCB（續）", *lines_of(pcb("1003"))]))
+
+
+def test_every_message_fits_and_nothing_is_lost() -> None:
+    hits = [pcb(f"1{i:03d}") for i in range(20)] + [mem(f"2{i:03d}") for i in range(15)]
+    hits += [pcb(f"3{i:03d}", Side.SHORT) for i in range(25)]
+    r = report(*hits, not_evaluated=tuple(f"9{i:03d}" for i in range(50)), mismatch=("1001",))
+
+    messages = format_messages(r, INDUSTRIES, 300)
+
+    assert len(messages) > 3 and all(text_length(m) <= 300 for m in messages)
+    received = [line for m in messages for line in m.splitlines() if line and not line.endswith("（續）")]
+    assert received == [line for line in format_report(r, INDUSTRIES).splitlines() if line]
+
+
+def test_line_longer_than_limit_is_cut() -> None:
+    r = report(not_evaluated=tuple(f"{i:04d}" for i in range(100)))
+    footer = format_report(r, INDUSTRIES).splitlines()[-1]
+
+    messages = format_messages(r, INDUSTRIES, 120)
+
+    assert all(text_length(m) <= 120 for m in messages)
+    assert footer in "".join(m.replace("\n", "") for m in messages)     # 切開的片段依序接起來就是原本那一行
+
+
+def test_text_length_counts_utf16_units_like_discord() -> None:
+    assert text_length("台積電") == 3
+    assert text_length("⚠️") == 2              # U+26A0 + U+FE0F
+    assert text_length("😀") == 2              # BMP 之外的字元佔 2 個
+
+
+# --- 錯誤通知 ---------------------------------------------------------------
+
+def test_failure_message() -> None:
+    text = format_failure("盤中選股執行失敗（2026-11-02 13:10）", "盤中報價抓取失敗：HTTP 503",
+                          Path("logs/screener-2026-11-02.log"), 2000)
+
+    assert text.splitlines() == [
+        "❌ 盤中選股執行失敗（2026-11-02 13:10）",
+        "盤中報價抓取失敗：HTTP 503",
+        f"詳細內容請看 log：{Path('logs/screener-2026-11-02.log')}",
+    ]
+
+
+def test_long_failure_detail_is_truncated() -> None:
+    text = format_failure("盤後更新執行失敗", "錯" * 500, Path("logs/x.log"), 100)
+
+    lines = text.splitlines()
+    assert text_length(text) <= 100
+    assert lines[1].endswith("…") and lines[2] == f"詳細內容請看 log：{Path('logs/x.log')}"

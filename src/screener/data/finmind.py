@@ -17,7 +17,7 @@ import requests
 
 from screener.config import FinMindSettings
 from screener.data.base import DataSourceError
-from screener.data.http import HttpClient, RetryableError
+from screener.http import HttpClient, RetryableError
 from screener.models import DailyBar
 
 logger = logging.getLogger(__name__)

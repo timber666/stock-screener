@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M4（盤中即時報價），`scan --dry-run` 可在盤中印出結果；下一步是 M5（Discord 推播與排程）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 🚧 開發中：已完成 M5（Discord 推播、錯誤通知與排程），待交易日實測。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 架構
 
@@ -43,8 +43,8 @@ pip install -e ".[dev]"
 |---|---|
 | `config/watchlist.yaml` | 觀察清單、族群與題材（附範例，請換成自己的清單） |
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
-| `config/settings.yaml` | 資料庫與 log 路徑、回補天數、FinMind 與 MIS 的請求頻率、逾時與重試 |
-| `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得 |
+| `config/settings.yaml` | 資料庫與 log 路徑、回補天數、FinMind、MIS 與 Discord 的請求頻率、逾時與重試 |
+| `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
 設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類、題材，都會直接報錯並指出位置。
 
@@ -59,21 +59,39 @@ python -m screener --help
 | 指令 | 用途 |
 |---|---|
 | `python -m screener update` | 盤後更新資料庫 |
-| `python -m screener scan` | 盤中掃描並推播 |
+| `python -m screener scan` | 盤中掃描並推播 Discord |
 | `python -m screener scan --dry-run` | 只印在終端，不推播 |
-| `python -m screener scan --replay 2026-10-29 --dry-run` | 以該日日 K 當作「今日」重跑並印出結果，供非交易時段測試與展示 |
+| `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑並推播（標題標示「回放」），供非交易時段測試與展示；加 `--dry-run` 只印在終端 |
 | `python -m screener analyze 2330 2454` | 印出轉折點、基本趨勢與破位修正後的趨勢，供檢查分析結果；`--date` 指定「今日」 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
 
-目前 Discord 推播（M5）尚未完成：`scan` 需加上 `--dry-run`，結果印在終端。非交易日執行時直接結束、不輸出結果。
+### 盤中掃描（`scan`）
+
+- 以 TWSE MIS 即時報價合成今日暫定 K 棒，接在資料庫的日 K 之後判斷，約 15～25 秒完成。
+- 非交易日（MIS 回傳的資料日期不是今天）直接結束，不推播。
+- 結果超過 Discord 單則 2000 字時依族群拆成多則；`--dry-run` 印出時以「──── 第 1/2 則 ────」分隔。
+- 執行失敗（MIS 無法連線、資料庫不存在、`rules.yaml` 錯誤等）時推送「❌ 盤中選股執行失敗」與原因，避免誤以為只是沒有訊號。
+- 未設定 `DISCORD_WEBHOOK_URL` 時無法推播，以結束碼 2 結束；只想看結果請加 `--dry-run`。
 
 ### 盤後更新（`update`）
 
 - 第一次執行會為每檔股票回補 `backfill_days`（預設 365）天的日 K，之後只補抓資料庫最後一筆之後的資料，資料庫建在 `data/screener.db`。
 - 每檔一次請求。FinMind 免費會員每小時上限 600 次，觀察清單 290 檔首次回補約需 5 分鐘。
 - FinMind 每個交易日約 17:30 更新，請在此之後執行。
-- 中途失敗（網路、超過請求上限等）時，已寫入的資料會保留，重新執行即可從中斷處繼續。
+- 中途失敗（網路、超過請求上限等）時，已寫入的資料會保留，重新執行即可從中斷處繼續；設定了 webhook 時會推送「❌ 盤後更新執行失敗」。成功時不推播。
+
+### 排程（Windows 工作排程器）
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
+```
+
+註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00` 調整，`-Unregister` 移除。
+
+- 以目前使用者身分執行，電腦須開機且已登入；執行時會出現命令列視窗。
+- 錯過的 update（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
+- 國定假日照常觸發，scan 會判定為非交易日後結束。
 
 ## 選股規則
 

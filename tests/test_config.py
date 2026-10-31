@@ -168,7 +168,7 @@ def test_non_positive_backfill_days_is_rejected(config_dir: Path) -> None:
         ("request_interval_sec", "1", "request_interval_sec：應為數字"),
     ],
 )
-@pytest.mark.parametrize("section", ["finmind", "mis"])
+@pytest.mark.parametrize("section", ["finmind", "mis", "discord"])
 def test_invalid_request_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
                                              message: str) -> None:
     edit_yaml(config_dir / "settings.yaml", lambda d: d[section].update({key: value}))

@@ -8,11 +8,13 @@ from typing import Any
 import pytest
 
 from conftest import REPO_ROOT, load_fixture, read_yaml, to_bars, write_yaml
+import screener.__main__ as cli
 from screener.__main__ import EXIT_CONFIG_ERROR, EXIT_FAILED, EXIT_OK, main
 from screener.data.base import DataSourceError
 from screener.data.db import SqlitePriceStore
 from screener.jobs import daily_update, intraday_scan
 from screener.models import DailyBar, Quote
+from screener.notify.base import NotifyError
 
 
 def test_help_runs_as_module() -> None:
@@ -43,10 +45,10 @@ def test_config_error_exits_with_config_error_code(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("argv", [["scan"], ["scan", "--replay", "2026-10-29"]])
-def test_push_without_dry_run_is_not_implemented_yet(config_dir: Path, argv: list[str]) -> None:
-    assert main(["--config-dir", str(config_dir), *argv]) == EXIT_FAILED
+def test_push_without_webhook_exits_with_config_error(config_dir: Path, argv: list[str]) -> None:
+    assert main(["--config-dir", str(config_dir), *argv]) == EXIT_CONFIG_ERROR
 
-    assert "Discord 推播尚未實作（M5）" in read_log(config_dir)
+    assert "未設定 DISCORD_WEBHOOK_URL" in read_log(config_dir)
 
 
 # --- update -----------------------------------------------------------------
@@ -232,3 +234,117 @@ def test_intraday_dry_run_on_non_trading_day_exits_quietly(
 
     assert capsys.readouterr().out == ""
     assert "非交易日，不掃描" in read_log(config_dir)
+
+
+# --- Discord 推播與錯誤通知 --------------------------------------------------
+
+WEBHOOK_URL = "https://discord.com/api/webhooks/123/test-token"
+
+
+class FakeWebhook:
+    """取代 DiscordWebhook：記錄送出的訊息；fail 為 True 時拋出 NotifyError。"""
+
+    sent: list[str] = []
+    fail = False
+
+    def __init__(self, settings: Any, url: str) -> None:
+        assert url == WEBHOOK_URL
+
+    def send(self, content: str) -> None:
+        if self.fail:
+            raise NotifyError("Discord 拒絕訊息（HTTP 404：Unknown Webhook）")
+        self.sent.append(content)
+
+
+@pytest.fixture
+def webhook(config_dir: Path, monkeypatch: pytest.MonkeyPatch) -> type[FakeWebhook]:
+    """在 .env 加上 webhook（conftest 已把 .env 指向暫存目錄），並換掉 DiscordWebhook。"""
+    with (config_dir.parent / ".env").open("a", encoding="utf-8") as env:
+        env.write(f"DISCORD_WEBHOOK_URL={WEBHOOK_URL}\n")
+    monkeypatch.setattr(cli, "DiscordWebhook", FakeWebhook)
+    monkeypatch.setattr(FakeWebhook, "sent", [])
+    return FakeWebhook
+
+
+def test_scan_failure_sends_error_notification(config_dir: Path, webhook: type[FakeWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05"]) == EXIT_FAILED
+
+    (message,) = webhook.sent
+    lines = message.splitlines()
+    assert lines[0].startswith("❌ 回放 2026-02-05執行失敗（")
+    assert "找不到資料庫" in lines[1]
+    assert lines[2].startswith("詳細內容請看 log：") and lines[2].endswith(".log")
+
+
+def test_rules_error_also_sends_error_notification(config_dir: Path, webhook: type[FakeWebhook]) -> None:
+    rules = read_yaml(config_dir / "rules.yaml")
+    rules["entry_rules"][0]["id"] = "bull_ma5_breakuot"
+    write_yaml(config_dir / "rules.yaml", rules)
+
+    assert main(["--config-dir", str(config_dir), "scan"]) == EXIT_CONFIG_ERROR
+
+    (message,) = webhook.sent
+    assert message.startswith("❌ 盤中選股執行失敗（") and "設定檔錯誤" in message
+
+
+def test_unexpected_error_notification_names_the_exception(
+    config_dir: Path, webhook: type[FakeWebhook], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(*args: Any, **kwargs: Any) -> None:
+        raise KeyError("close")
+
+    monkeypatch.setattr(intraday_scan, "run", broken)
+
+    assert main(["--config-dir", str(config_dir), "scan"]) == EXIT_FAILED
+
+    assert "KeyError: 'close'" in webhook.sent[0]
+    assert "Traceback" in read_log(config_dir)
+
+
+def test_failed_error_notification_is_only_logged(
+    config_dir: Path, webhook: type[FakeWebhook], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(webhook, "fail", True)
+
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05"]) == EXIT_FAILED
+
+    assert "錯誤通知推送失敗：Discord 拒絕訊息" in read_log(config_dir)
+
+
+def test_replay_is_pushed(config_dir: Path, analysis_db: str, webhook: type[FakeWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05"]) == EXIT_OK
+
+    assert webhook.sent[0].startswith("【回放】2026-02-05（以收盤 K 棒計算）")
+    assert "已推播 Discord" in read_log(config_dir)
+
+
+def test_update_failure_sends_error_notification(
+    config_dir: Path, fake_finmind: type[FakeFinMindClient], webhook: type[FakeWebhook],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(fake_finmind, "fail_on", read_yaml(config_dir / "watchlist.yaml")["stocks"][1]["code"])
+
+    assert main(["--config-dir", str(config_dir), "update"]) == EXIT_FAILED
+
+    (message,) = webhook.sent
+    assert message.startswith("❌ 盤後更新執行失敗（") and "抓取失敗" in message
+
+
+def test_successful_update_sends_nothing(
+    config_dir: Path, fake_finmind: type[FakeFinMindClient], webhook: type[FakeWebhook]
+) -> None:
+    assert main(["--config-dir", str(config_dir), "update"]) == EXIT_OK
+
+    assert webhook.sent == []
+
+
+def test_update_without_webhook_still_runs(config_dir: Path, fake_finmind: type[FakeFinMindClient]) -> None:
+    assert main(["--config-dir", str(config_dir), "update"]) == EXIT_OK
+
+    assert "未設定 DISCORD_WEBHOOK_URL（.env），失敗時不會推送錯誤通知" in read_log(config_dir)
+
+
+def test_dry_run_never_uses_webhook(config_dir: Path, webhook: type[FakeWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05", "--dry-run"]) == EXIT_FAILED
+
+    assert webhook.sent == []

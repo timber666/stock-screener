@@ -18,7 +18,7 @@ import requests
 
 from screener.config import MisSettings
 from screener.data.base import DataSourceError
-from screener.data.http import HttpClient, RetryableError
+from screener.http import HttpClient, RetryableError
 from screener.models import Quote, StockInfo
 
 logger = logging.getLogger(__name__)

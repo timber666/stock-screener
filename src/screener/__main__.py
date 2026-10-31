@@ -4,12 +4,15 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
-from screener.config import ConfigError, load_config, load_secrets
+from screener.config import ConfigError, DiscordSettings, load_config, load_secrets
 from screener.jobs import JobFailed, analyze, daily_update, intraday_scan
 from screener.logging_setup import setup_logging
+from screener.notify.base import Notifier, NotifyError
+from screener.notify.discord import MESSAGE_LIMIT, DiscordWebhook
+from screener.notify.message import format_failure
 
 logger = logging.getLogger("screener.cli")     # 以 -m 執行時 __name__ 是 "__main__"
 
@@ -86,24 +89,66 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     log_file = setup_logging(config.settings.log_dir, verbose=args.verbose)
     logger.info("執行 %s，觀察清單 %d 檔，log 寫入 %s", args.command, len(config.watchlist.stocks), log_file)
+    started_at = datetime.now()
+
+    secrets = load_secrets(ENV_FILE)
+    try:
+        notifier = _notifier(args, config.settings.discord, secrets.discord_webhook_url)
+    except ConfigError as exc:
+        logger.error("設定錯誤：%s", exc)
+        return EXIT_CONFIG_ERROR
 
     try:
         if args.command == "update":
-            daily_update.run(config, load_secrets(ENV_FILE))
+            daily_update.run(config, secrets)
         elif args.command == "analyze":
             analyze.run(config, args.codes, as_of=args.date)
         else:
-            intraday_scan.run(config, dry_run=args.dry_run, replay=args.replay)
+            intraday_scan.run(config, replay=args.replay, notifier=notifier)
     except ConfigError as exc:                 # 例：rules.yaml 的規則 id 或參數錯誤，建立規則時才會發現
         logger.error("設定檔錯誤：%s", exc)
+        _notify_failure(notifier, args, started_at, f"設定檔錯誤：{exc}", log_file)
         return EXIT_CONFIG_ERROR
-    except (JobFailed, NotImplementedError) as exc:
+    except JobFailed as exc:
         logger.error("%s", exc)
+        _notify_failure(notifier, args, started_at, str(exc), log_file)
         return EXIT_FAILED
-    except Exception:
+    except Exception as exc:
         logger.exception("執行 %s 失敗", args.command)
+        _notify_failure(notifier, args, started_at, f"{type(exc).__name__}: {exc}", log_file)
         return EXIT_FAILED
     return EXIT_OK
+
+
+def _notifier(args: argparse.Namespace, settings: DiscordSettings, webhook_url: str | None) -> Notifier | None:
+    """scan 推播結果與錯誤通知；update 只推錯誤通知（D30）；analyze 與 --dry-run 不推播。"""
+    pushes_results = args.command == "scan" and not args.dry_run
+    if not (pushes_results or args.command == "update"):
+        return None
+    if webhook_url:
+        return DiscordWebhook(settings, webhook_url)
+    if pushes_results:
+        raise ConfigError("未設定 DISCORD_WEBHOOK_URL（.env），無法推播；只要在終端查看結果請加上 --dry-run")
+    logger.warning("未設定 DISCORD_WEBHOOK_URL（.env），失敗時不會推送錯誤通知")
+    return None
+
+
+def _notify_failure(notifier: Notifier | None, args: argparse.Namespace, started_at: datetime, detail: str,
+                    log_file: Path) -> None:
+    """推送錯誤通知，避免使用者誤以為只是沒有訊號（PROJECT_PLAN.md 7.2）。推送失敗時只記錄在 log。"""
+    if notifier is None:
+        return
+    if args.command == "update":
+        job = "盤後更新"
+    else:
+        job = f"回放 {args.replay}" if args.replay else "盤中選股"
+    title = f"{job}執行失敗（{started_at:%Y-%m-%d %H:%M}）"
+    try:
+        notifier.send(format_failure(title, detail, log_file, MESSAGE_LIMIT))
+    except NotifyError as exc:
+        logger.error("錯誤通知推送失敗：%s", exc)
+    else:
+        logger.info("已推送錯誤通知")
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from screener.jobs import JobFailed
 from screener.jobs import intraday_scan as intraday_scan_module
 from screener.jobs.intraday_scan import intraday_scan, replay_scan, run
 from screener.models import DailyBar, Market, PriceSubstitute, Quote, Side, StockInfo
+from screener.notify.base import NotifyError
 
 CONFIG = load_config(REPO_CONFIG_DIR)
 ENGINE = Engine.from_config(CONFIG.rules)
@@ -76,21 +77,60 @@ def test_day_without_any_bars_fails(store: SqlitePriceStore) -> None:
         scan(store, [stock("3333")])
 
 
-def test_run_prints_report(store: SqlitePriceStore, tmp_path: Path) -> None:
-    watchlist = replace(CONFIG.watchlist, stocks=(stock("1111"), stock("2222")))
-    config = replace(CONFIG, watchlist=watchlist,
-                     settings=replace(CONFIG.settings, db_path=tmp_path / "screener.db"))
+class FakeNotifier:
+    """記錄送出的訊息；fail 為 True 時拋出 NotifyError。"""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.sent: list[str] = []
+        self.fail = fail
+
+    def send(self, content: str) -> None:
+        if self.fail:
+            raise NotifyError("Discord webhook 請求失敗，已重試 3 次：HTTP 503")
+        self.sent.append(content)
+
+
+@pytest.fixture
+def replay_config(store: SqlitePriceStore, tmp_path: Path):
+    watchlist = replace(CONFIG.watchlist, stocks=(stock("1111"), stock("2222"), stock("4444")))
+    return replace(CONFIG, watchlist=watchlist, settings=replace(CONFIG.settings, db_path=tmp_path / "screener.db"))
+
+
+def test_dry_run_prints_report(replay_config) -> None:
     out = io.StringIO()
 
-    run(config, dry_run=True, replay=DAY, out=out)
+    run(replay_config, replay=DAY, notifier=None, out=out)
 
     assert out.getvalue().startswith(f"【回放】{DAY}（以收盤 K 棒計算）\n\n━━ 多方 ━━\n▍PCB\n1111 股1111  110  ▲10.0%｜銅箔基板｜")
 
 
-@pytest.mark.parametrize("replay", [None, DAY], ids=["intraday", "replay"])
-def test_push_is_not_implemented_yet(replay) -> None:
-    with pytest.raises(NotImplementedError, match="Discord 推播尚未實作（M5）"):
-        run(CONFIG, dry_run=False, replay=replay)
+def test_report_is_pushed_to_notifier(replay_config) -> None:
+    notifier, out = FakeNotifier(), io.StringIO()
+
+    run(replay_config, replay=DAY, notifier=notifier, out=out)
+
+    (message,) = notifier.sent
+    assert message.startswith(f"【回放】{DAY}（以收盤 K 棒計算）") and "1111 股1111" in message
+    assert out.getvalue() == ""
+
+
+def test_long_report_is_split(replay_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 多方、空方各一個族群，上限設成放不下兩個族群
+    monkeypatch.setattr(intraday_scan_module, "MESSAGE_LIMIT", 80)
+    notifier, out = FakeNotifier(), io.StringIO()
+
+    run(replay_config, replay=DAY, notifier=notifier)
+    run(replay_config, replay=DAY, notifier=None, out=out)
+
+    assert len(notifier.sent) > 1 and all(len(message) <= 80 for message in notifier.sent)
+    printed = out.getvalue()
+    assert printed.startswith(f"──── 第 1/{len(notifier.sent)} 則 ────\n【回放】")
+    assert f"\n\n──── 第 2/{len(notifier.sent)} 則 ────\n" in printed
+
+
+def test_push_failure_fails_the_job(replay_config) -> None:
+    with pytest.raises(JobFailed, match="推播失敗（第 1/1 則）"):
+        run(replay_config, replay=DAY, notifier=FakeNotifier(fail=True))
 
 
 # --- 盤中 -------------------------------------------------------------------
@@ -289,7 +329,7 @@ def test_run_prints_intraday_report(intraday_config) -> None:
     config = intraday_config(quote("1111"), quote("2222", open=None, last=None, best_bid=None, best_ask=None))
     out = io.StringIO()
 
-    run(config, dry_run=True, replay=None, out=out, now=NOW)
+    run(config, replay=None, notifier=None, out=out, now=NOW)
 
     assert out.getvalue() == "\n".join([
         f"【盤中選股】{TODAY} 13:10（暫定 K 棒，收盤前可能變動）",
@@ -309,6 +349,6 @@ def test_run_prints_nothing_on_non_trading_day(intraday_config) -> None:
     config = intraday_config(quote("1111", day=LAST_TRADING_DAY), quote("2222", day=LAST_TRADING_DAY))
     out = io.StringIO()
 
-    run(config, dry_run=True, replay=None, out=out, now=NOW)
+    run(config, replay=None, notifier=None, out=out, now=NOW)
 
     assert out.getvalue() == ""

@@ -1,7 +1,7 @@
 """盤中 job：合成暫定 K 棒、執行規則引擎並推播（PROJECT_PLAN.md 7.2）。
 
 盤中模式以 MIS 快照合成今日暫定 K 棒，接在資料庫的歷史日 K 之後；回放模式（--replay）以資料庫中
-該日（含）以前的日 K 建立 StockContext，該日 K 棒視為「今日」。Discord 推播於 M5 實作。
+該日（含）以前的日 K 建立 StockContext，該日 K 棒視為「今日」。結果推播到 Discord，--dry-run 時只印在終端。
 """
 
 import logging
@@ -19,17 +19,19 @@ from screener.data.mis import MisClient
 from screener.engine import Engine
 from screener.jobs import JobFailed, open_existing_store
 from screener.models import DailyBar, Hit, PriceSubstitute, Quote, ScanReport, Side, StockContext, StockInfo
-from screener.notify.message import format_report
+from screener.notify.base import Notifier, NotifyError
+from screener.notify.discord import MESSAGE_LIMIT
+from screener.notify.message import format_messages
 
 logger = logging.getLogger(__name__)
 
 
-def run(config: AppConfig, *, dry_run: bool, replay: date | None, out: TextIO | None = None,
+def run(config: AppConfig, *, replay: date | None, notifier: Notifier | None, out: TextIO | None = None,
         now: datetime | None = None) -> None:
-    """結果預設印到 stdout；now 預設為目前時間，盤中模式以它判斷「今天」。"""
-    if not dry_run:
-        raise NotImplementedError("Discord 推播尚未實作（M5）；請加上 --dry-run，結果會印在終端")
+    """結果推播到 notifier；notifier 為 None 時（--dry-run）印到 out（預設 stdout）。
 
+    超過單則上限時依族群拆成多則（第 11 節）。now 預設為目前時間，盤中模式以它判斷「今天」。
+    """
     engine = Engine.from_config(config.rules)
     stocks, trend_config = config.watchlist.stocks, config.rules.trend
     with open_existing_store(config.settings.db_path) as store:
@@ -40,7 +42,24 @@ def run(config: AppConfig, *, dry_run: bool, replay: date | None, out: TextIO | 
                                    trend_config=trend_config, settings=config.settings.mis, now=now or datetime.now())
     if report is None:                          # 非交易日：直接結束，不推播
         return
-    (out or sys.stdout).write(format_report(report, config.watchlist.industries) + "\n")
+
+    messages = format_messages(report, config.watchlist.industries, MESSAGE_LIMIT)
+    if notifier is None:
+        _print_messages(messages, out or sys.stdout)
+        return
+    for i, message in enumerate(messages, start=1):
+        try:
+            notifier.send(message)
+        except NotifyError as exc:
+            raise JobFailed(f"推播失敗（第 {i}/{len(messages)} 則）：{exc}") from exc
+    logger.info("已推播 Discord：%d 則", len(messages))
+
+
+def _print_messages(messages: Sequence[str], out: TextIO) -> None:
+    """多則時以分隔線標示每一則的範圍，方便確認拆分結果。"""
+    if len(messages) > 1:
+        messages = [f"──── 第 {i}/{len(messages)} 則 ────\n{message}" for i, message in enumerate(messages, start=1)]
+    out.write("\n\n".join(messages) + "\n")
 
 
 # --- 盤中 -------------------------------------------------------------------

@@ -67,10 +67,12 @@ def make_context(bars: pd.DataFrame, trend: Trend = Trend.UNKNOWN, info: StockIn
 # --- HTTP 測試替身（FinMind、MIS 共用）-----------------------------------------
 
 class FakeResponse:
-    def __init__(self, status_code: int = 200, body: Any = None, text: str | None = None) -> None:
+    def __init__(self, status_code: int = 200, body: Any = None, text: str | None = None,
+                 headers: dict[str, str] | None = None) -> None:
         self.status_code = status_code
         self._body = body
         self.text = json.dumps(body) if text is None else text
+        self.headers = headers or {}
 
     def json(self) -> Any:
         if self._body is None:
@@ -85,8 +87,8 @@ class FakeSession:
         self.outcomes = list(outcomes)
         self.calls: list[dict[str, Any]] = []
 
-    def get(self, url: str, **kwargs: Any) -> FakeResponse:
-        self.calls.append({"url": url, **kwargs})
+    def request(self, method: str, url: str, **kwargs: Any) -> FakeResponse:
+        self.calls.append({"method": method, "url": url, **kwargs})
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -134,6 +136,16 @@ def _reset_logging() -> Iterator[None]:
     # 關閉 log 檔 handler，避免 Windows 上暫存目錄的檔案被鎖住
     yield
     reset_logging()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """不讀取 repo 的 .env 與環境變數中的 token、webhook，避免測試用到真的憑證。"""
+    import screener.__main__
+
+    monkeypatch.setattr(screener.__main__, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.delenv("FINMIND_TOKEN", raising=False)
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)

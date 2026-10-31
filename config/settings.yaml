@@ -14,3 +14,8 @@ mis:
   batch_size: 50              # 每次請求的股票數；實測 150 檔可以，290 檔會因網址過長被拒（HTTP 414）
   missing_price_retry: 1      # 成交價為 "-"（該時點沒有成交）時重新查詢的次數，仍為 "-" 就改用最佳買價
   missing_price_wait_sec: 5   # 重新查詢前等待的秒數
+discord:
+  timeout_sec: 10
+  retry: 3                    # 連線失敗、逾時、伺服器錯誤或被限流（HTTP 429）時的重試次數
+  retry_backoff_sec: 5        # 被限流時改等 Discord 指定的秒數
+  request_interval_sec: 1     # 多則訊息之間的間隔

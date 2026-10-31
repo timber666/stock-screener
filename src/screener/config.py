@@ -43,12 +43,18 @@ class MisSettings(RequestSettings):
 
 
 @dataclass(frozen=True)
+class DiscordSettings(RequestSettings):
+    pass
+
+
+@dataclass(frozen=True)
 class Settings:
     db_path: Path
     log_dir: Path
     backfill_days: int
     finmind: FinMindSettings
     mis: MisSettings
+    discord: DiscordSettings
 
 
 @dataclass(frozen=True)
@@ -120,7 +126,7 @@ def load_secrets(env_file: Path) -> Secrets:
 def _load_settings(path: Path) -> Settings:
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis"}, where)
+    check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis", "discord"}, where)
 
     finmind_where = f"{where} > finmind"
     finmind_data = get_field(data, "finmind", dict, where)
@@ -140,12 +146,18 @@ def _load_settings(path: Path) -> Settings:
     require(mis.missing_price_retry >= 0, f"{mis_where} > missing_price_retry：不可為負數")
     require(mis.missing_price_wait_sec >= 0, f"{mis_where} > missing_price_wait_sec：不可為負數")
 
+    discord_where = f"{where} > discord"
+    discord_data = get_field(data, "discord", dict, where)
+    check_keys(discord_data, _REQUEST_KEYS, discord_where)
+    discord = DiscordSettings(**_parse_request_settings(discord_data, discord_where))
+
     settings = Settings(
         db_path=Path(get_field(data, "db_path", str, where)),
         log_dir=Path(get_field(data, "log_dir", str, where)),
         backfill_days=get_field(data, "backfill_days", int, where),
         finmind=finmind,
         mis=mis,
+        discord=discord,
     )
     require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
     return settings
