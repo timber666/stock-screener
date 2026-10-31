@@ -10,6 +10,7 @@ import requests
 import yaml
 
 from screener.logging_setup import reset_logging
+from screener.models import Market, StockContext, StockInfo, Trend
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_CONFIG_DIR = REPO_ROOT / "config"
@@ -44,6 +45,22 @@ def make_bars(closes: Sequence[float], start: date = date(2026, 1, 5)) -> pd.Dat
     """以收盤價建立 start 起連續平日的 K 棒（開高低等於收盤）。"""
     index = pd.Index(pd.bdate_range(start, periods=len(closes)).date, name="date")
     return to_bars(pd.DataFrame({"close": closes}, index=index))
+
+
+def set_bar(bars: pd.DataFrame, position: int, **values: float) -> pd.DataFrame:
+    """回傳修改第 position 根（-1 為今日）K 棒欄位後的複本，例：set_bar(bars, -1, open=10, volume=1500)。"""
+    bars = bars.copy()
+    for column, value in values.items():
+        bars.loc[bars.index[position], column] = value
+    return bars
+
+
+TEST_STOCK = StockInfo(code="2330", name="台積電", market=Market.TSE, group="半導體", subcategory="製造")
+
+
+def make_context(bars: pd.DataFrame, trend: Trend = Trend.UNKNOWN, info: StockInfo = TEST_STOCK) -> StockContext:
+    """直接建立 StockContext（不計算轉折點），供只看 K 棒與均線的規則測試使用。"""
+    return StockContext(info=info, bars=bars, is_tentative=False, pivots=[], trend=trend)
 
 
 def read_yaml(path: Path) -> Any:

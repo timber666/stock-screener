@@ -94,6 +94,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             analyze.run(config, args.codes, as_of=args.date)
         else:
             intraday_scan.run(config, dry_run=args.dry_run, replay=args.replay)
+    except ConfigError as exc:                 # 例：rules.yaml 的規則 id 或參數錯誤，建立規則時才會發現
+        logger.error("設定檔錯誤：%s", exc)
+        return EXIT_CONFIG_ERROR
     except (JobFailed, NotImplementedError) as exc:
         logger.error("%s", exc)
         return EXIT_FAILED

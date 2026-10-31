@@ -2,13 +2,15 @@
 
 import pandas as pd
 
-# 收盤價最多兩位小數。均線與收盤價相等時，四捨五入到小數 6 位可消除 rolling 的浮點誤差，
-# 讓「收盤 = 均線」（觸碰）的比較正確；不相等時差距至少 0.01/n，不會因四捨五入而變成相等。
-_MA_DECIMALS = 6
+from screener.analysis.numeric import DECIMALS
 
 
 def sma(closes: pd.Series, n: int) -> pd.Series:
-    """最近 n 根 K 棒收盤價的簡單移動平均；不足 n 根的位置為 NaN。"""
+    """最近 n 根 K 棒收盤價的簡單移動平均；不足 n 根的位置為 NaN。
+
+    結果四捨五入到小數 DECIMALS 位以消除 rolling 的浮點誤差，讓「收盤 = 均線」（觸碰）的
+    比較正確；收盤價與均線不相等時差距至少 0.01/n，不會因此變成相等。
+    """
     if n <= 0:
         raise ValueError(f"均線天數必須大於 0：{n}")
-    return closes.rolling(window=n, min_periods=n).mean().round(_MA_DECIMALS)
+    return closes.rolling(window=n, min_periods=n).mean().round(DECIMALS)

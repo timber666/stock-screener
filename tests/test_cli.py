@@ -180,6 +180,28 @@ def test_analyze_without_database_fails_without_creating_it(config_dir: Path) ->
     assert not (config_dir.parent / "data" / "screener.db").exists()
 
 
+# --- scan --replay -----------------------------------------------------------
+
+def test_replay_dry_run_prints_report(
+    config_dir: Path, analysis_db: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05", "--dry-run"]) == EXIT_OK
+
+    out = capsys.readouterr().out
+    assert out.startswith("【回放】2026-02-05（以收盤 K 棒計算）")
+    assert f"⚠️ {len(read_yaml(config_dir / 'watchlist.yaml')['stocks']) - 1} 檔當日沒有日 K" in out
+
+
+def test_unknown_rule_id_exits_with_config_error(config_dir: Path, analysis_db: str) -> None:
+    rules = read_yaml(config_dir / "rules.yaml")
+    rules["entry_rules"][0]["id"] = "bull_ma5_breakuot"
+    write_yaml(config_dir / "rules.yaml", rules)
+
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05", "--dry-run"]) == EXIT_CONFIG_ERROR
+
+    assert "設定檔錯誤：rules.yaml > entry_rules > bull_ma5_breakuot：未知的規則 id" in read_log(config_dir)
+
+
 def read_log(config_dir: Path) -> str:
     log_files = list((config_dir.parent / "logs").glob("screener-*.log"))
     assert len(log_files) == 1

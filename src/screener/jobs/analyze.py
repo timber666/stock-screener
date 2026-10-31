@@ -9,8 +9,7 @@ from typing import TextIO
 from screener.analysis.context import bars_to_frame, build_context, pivot_window
 from screener.analysis.trend import basic_trend, closes_since_last_pivot, last_pivot
 from screener.config import AppConfig, TrendConfig
-from screener.data.db import SqlitePriceStore
-from screener.jobs import JobFailed
+from screener.jobs import JobFailed, open_existing_store
 from screener.models import StockContext, Trend
 
 
@@ -21,12 +20,8 @@ def run(config: AppConfig, codes: Sequence[str], *, as_of: date | None, out: Tex
     unknown = [code for code in codes if code not in stocks]
     if unknown:
         raise JobFailed(f"觀察清單沒有這些代號：{'、'.join(unknown)}")
-    db_path = config.settings.db_path
-    if not db_path.is_file():
-        raise JobFailed(f"找不到資料庫 {db_path}，請先執行 update")
-
     missing: list[str] = []
-    with SqlitePriceStore(db_path) as store:
+    with open_existing_store(config.settings.db_path) as store:
         for code in codes:
             bars = [bar for bar in store.get_bars(code) if as_of is None or bar.date <= as_of]
             if not bars or (as_of is not None and bars[-1].date != as_of):

@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M2（均線、轉折點與趨勢判斷），下一步是 M3（規則引擎與選股規則）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 🚧 開發中：已完成 M3（規則引擎與選股規則），可用歷史資料回放；下一步是 M4（盤中即時報價）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 架構
 
@@ -61,10 +61,12 @@ python -m screener --help
 | `python -m screener update` | 盤後更新資料庫 |
 | `python -m screener scan` | 盤中掃描並推播 |
 | `python -m screener scan --dry-run` | 只印在終端，不推播 |
-| `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑，供非交易時段測試與展示 |
+| `python -m screener scan --replay 2026-10-29 --dry-run` | 以該日日 K 當作「今日」重跑並印出結果，供非交易時段測試與展示 |
 | `python -m screener analyze 2330 2454` | 印出轉折點、基本趨勢與破位修正後的趨勢，供檢查分析結果；`--date` 指定「今日」 |
 
-安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`。
+安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.4x，突破 40 日高 97.9」）。
+
+目前盤中掃描（M4）與 Discord 推播（M5）尚未完成：`scan` 只能搭配 `--replay` 與 `--dry-run` 使用。
 
 ### 盤後更新（`update`）
 
@@ -72,6 +74,55 @@ python -m screener --help
 - 每檔一次請求。FinMind 免費會員每小時上限 600 次，觀察清單 290 檔首次回補約需 5 分鐘。
 - FinMind 每個交易日約 17:30 更新，請在此之後執行。
 - 中途失敗（網路、超過請求上限等）時，已寫入的資料會保留，重新執行即可從中斷處繼續。
+
+## 選股規則
+
+規則定義在 [PROJECT_PLAN.md](PROJECT_PLAN.md) 第 3–5 節，參數在 `config/rules.yaml`：
+
+每條規則屬於多方或空方，前置條件只管同方向的規則。推播訊息先列多方、再列空方。
+
+| 方向 | 規則 | 條件 |
+|---|---|---|
+| 多方 | 前置條件：站上月線 | 現價 > MA20，未通過者不評估任何多方規則 |
+| 多方 | E1 多頭突破五日線紅K | 多頭；昨收 ≤ 昨日 MA5、現價 > 今日 MA5；紅 K |
+| 多方 | E2 盤整長紅爆量過前高 | 盤整；實體 ≥ 昨收 3%；量 ≥ 昨日 1.5 倍；現價 > 40 日高 |
+| 多方 | E3 三線多排 | 不限趨勢；MA5 > MA10 > MA20，只在形成當天觸發 |
+| 空方 | 前置條件：跌破月線 | 現價 < MA20，未通過者不評估任何空方規則 |
+| 空方 | E4 空頭跌破五日線黑K | 空頭；昨收 ≥ 昨日 MA5、現價 < 今日 MA5；黑 K |
+| 空方 | E6 盤整長黑破前低 | 盤整；實體 ≥ 昨收 3%；現價 < 40 日低；不看成交量 |
+| 空方 | E5 三線空排 | 不限趨勢；MA5 < MA10 < MA20，只在形成當天觸發 |
+
+### 新增規則
+
+1. 在 `src/screener/rules/entry/` 新增模組（前置條件放 `rules/filters/`）。模組會被自動匯入，不需要修改引擎：
+
+   ```python
+   from screener.models import Side, Signal, StockContext
+   from screener.rules.base import EntryRule, register_rule
+   from screener.rules.conditions import is_red, is_volume_spike
+
+
+   @register_rule("red_volume_spike")
+   class RedVolumeSpike(EntryRule):
+       name = "紅K爆量"
+       side = Side.LONG                                                      # 多方或空方
+       params_schema = {**EntryRule.params_schema, "volume_ratio": float}   # 參數全部必填，載入時檢查型別
+
+       def evaluate(self, ctx: StockContext) -> Signal | None:
+           if is_red(ctx) and is_volume_spike(ctx, self.params["volume_ratio"]):
+               return self.signal("紅 K 且爆量")
+           return None
+   ```
+
+2. 在 `config/rules.yaml` 的 `entry_rules` 加入設定，`trends` 為適用的趨勢（空陣列 = 不限）：
+
+   ```yaml
+     - id: red_volume_spike
+       enabled: true
+       params: { trends: [range], volume_ratio: 2.0 }
+   ```
+
+3. 在 `tests/rules/` 加上測試。`tests/conftest.py` 的 `make_bars`、`set_bar`、`make_context` 可以快速建立手工 K 棒。
 
 ## 測試
 

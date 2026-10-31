@@ -113,42 +113,42 @@ def load_secrets(env_file: Path) -> Secrets:
 def _load_settings(path: Path) -> Settings:
     data = _read_yaml(path)
     where = path.name
-    _check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis"}, where)
+    check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis"}, where)
 
     finmind_where = f"{where} > finmind"
-    finmind_data = _get(data, "finmind", dict, where)
-    _check_keys(finmind_data, {"timeout_sec", "retry", "retry_backoff_sec", "request_interval_sec"}, finmind_where)
+    finmind_data = get_field(data, "finmind", dict, where)
+    check_keys(finmind_data, {"timeout_sec", "retry", "retry_backoff_sec", "request_interval_sec"}, finmind_where)
     finmind = FinMindSettings(
-        timeout_sec=_get(finmind_data, "timeout_sec", float, finmind_where),
-        retry=_get(finmind_data, "retry", int, finmind_where),
-        retry_backoff_sec=_get(finmind_data, "retry_backoff_sec", float, finmind_where),
-        request_interval_sec=_get(finmind_data, "request_interval_sec", float, finmind_where),
+        timeout_sec=get_field(finmind_data, "timeout_sec", float, finmind_where),
+        retry=get_field(finmind_data, "retry", int, finmind_where),
+        retry_backoff_sec=get_field(finmind_data, "retry_backoff_sec", float, finmind_where),
+        request_interval_sec=get_field(finmind_data, "request_interval_sec", float, finmind_where),
     )
-    _require(finmind.timeout_sec > 0, f"{finmind_where} > timeout_sec：必須大於 0")
-    _require(finmind.retry >= 0, f"{finmind_where} > retry：不可為負數")
-    _require(finmind.retry_backoff_sec >= 0, f"{finmind_where} > retry_backoff_sec：不可為負數")
-    _require(finmind.request_interval_sec >= 0, f"{finmind_where} > request_interval_sec：不可為負數")
+    require(finmind.timeout_sec > 0, f"{finmind_where} > timeout_sec：必須大於 0")
+    require(finmind.retry >= 0, f"{finmind_where} > retry：不可為負數")
+    require(finmind.retry_backoff_sec >= 0, f"{finmind_where} > retry_backoff_sec：不可為負數")
+    require(finmind.request_interval_sec >= 0, f"{finmind_where} > request_interval_sec：不可為負數")
 
     mis_where = f"{where} > mis"
-    mis_data = _get(data, "mis", dict, where)
-    _check_keys(mis_data, {"batch_size", "request_interval_sec", "retry"}, mis_where)
+    mis_data = get_field(data, "mis", dict, where)
+    check_keys(mis_data, {"batch_size", "request_interval_sec", "retry"}, mis_where)
     mis = MisSettings(
-        batch_size=_get(mis_data, "batch_size", int, mis_where),
-        request_interval_sec=_get(mis_data, "request_interval_sec", float, mis_where),
-        retry=_get(mis_data, "retry", int, mis_where),
+        batch_size=get_field(mis_data, "batch_size", int, mis_where),
+        request_interval_sec=get_field(mis_data, "request_interval_sec", float, mis_where),
+        retry=get_field(mis_data, "retry", int, mis_where),
     )
-    _require(mis.batch_size > 0, f"{mis_where} > batch_size：必須大於 0")
-    _require(mis.request_interval_sec >= 0, f"{mis_where} > request_interval_sec：不可為負數")
-    _require(mis.retry >= 0, f"{mis_where} > retry：不可為負數")
+    require(mis.batch_size > 0, f"{mis_where} > batch_size：必須大於 0")
+    require(mis.request_interval_sec >= 0, f"{mis_where} > request_interval_sec：不可為負數")
+    require(mis.retry >= 0, f"{mis_where} > retry：不可為負數")
 
     settings = Settings(
-        db_path=Path(_get(data, "db_path", str, where)),
-        log_dir=Path(_get(data, "log_dir", str, where)),
-        backfill_days=_get(data, "backfill_days", int, where),
+        db_path=Path(get_field(data, "db_path", str, where)),
+        log_dir=Path(get_field(data, "log_dir", str, where)),
+        backfill_days=get_field(data, "backfill_days", int, where),
         finmind=finmind,
         mis=mis,
     )
-    _require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
+    require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
     return settings
 
 
@@ -157,23 +157,23 @@ def _load_settings(path: Path) -> Settings:
 def _load_rules(path: Path) -> RulesConfig:
     data = _read_yaml(path)
     where = path.name
-    _check_keys(data, {"trend", "filters", "entry_rules", "exit_rules"}, where)
+    check_keys(data, {"trend", "filters", "entry_rules", "exit_rules"}, where)
 
     trend_where = f"{where} > trend"
-    trend_data = _get(data, "trend", dict, where)
-    _check_keys(
+    trend_data = get_field(data, "trend", dict, where)
+    check_keys(
         trend_data,
         {"pivot_ma", "lookback_days", "bull_break_to_range", "bear_break_to_range"},
         trend_where,
     )
     trend = TrendConfig(
-        pivot_ma=_get(trend_data, "pivot_ma", int, trend_where),
-        lookback_days=_get(trend_data, "lookback_days", int, trend_where),
-        bull_break_to_range=_get(trend_data, "bull_break_to_range", bool, trend_where),
-        bear_break_to_range=_get(trend_data, "bear_break_to_range", bool, trend_where),
+        pivot_ma=get_field(trend_data, "pivot_ma", int, trend_where),
+        lookback_days=get_field(trend_data, "lookback_days", int, trend_where),
+        bull_break_to_range=get_field(trend_data, "bull_break_to_range", bool, trend_where),
+        bear_break_to_range=get_field(trend_data, "bear_break_to_range", bool, trend_where),
     )
-    _require(trend.pivot_ma > 0, f"{trend_where} > pivot_ma：必須大於 0")
-    _require(trend.lookback_days > 0, f"{trend_where} > lookback_days：必須大於 0")
+    require(trend.pivot_ma > 0, f"{trend_where} > pivot_ma：必須大於 0")
+    require(trend.lookback_days > 0, f"{trend_where} > lookback_days：必須大於 0")
 
     return RulesConfig(
         trend=trend,
@@ -186,16 +186,16 @@ def _load_rules(path: Path) -> RulesConfig:
 def _parse_rule_list(data: Mapping[str, Any], key: str, where: str) -> tuple[RuleConfig, ...]:
     rules: list[RuleConfig] = []
     seen: set[str] = set()
-    for i, item in enumerate(_get(data, key, list, where)):
+    for i, item in enumerate(get_field(data, key, list, where)):
         item_where = f"{where} > {key}[{i}]"
-        _require(isinstance(item, dict), f"{item_where}：應為 key: value 結構")
-        _check_keys(item, {"id", "enabled", "params"}, item_where)
+        require(isinstance(item, dict), f"{item_where}：應為 key: value 結構")
+        check_keys(item, {"id", "enabled", "params"}, item_where)
         rule = RuleConfig(
-            id=_get(item, "id", str, item_where),
-            enabled=_get(item, "enabled", bool, item_where),
-            params=_get(item, "params", dict, item_where),
+            id=get_field(item, "id", str, item_where),
+            enabled=get_field(item, "enabled", bool, item_where),
+            params=get_field(item, "params", dict, item_where),
         )
-        _require(rule.id not in seen, f"{item_where}：規則 id 重複：{rule.id}")
+        require(rule.id not in seen, f"{item_where}：規則 id 重複：{rule.id}")
         seen.add(rule.id)
         rules.append(rule)
     return tuple(rules)
@@ -209,28 +209,28 @@ _STOCK_KEYS = {"code", "name", "market", "industry", "themes"}
 def _load_watchlist(path: Path) -> Watchlist:
     data = _read_yaml(path)
     where = path.name
-    _check_keys(data, {"industries", "themes", "stocks"}, where)
+    check_keys(data, {"industries", "themes", "stocks"}, where)
 
     industries: dict[str, tuple[str, ...]] = {}
-    for group, subcategories in _get(data, "industries", dict, where).items():
+    for group, subcategories in get_field(data, "industries", dict, where).items():
         group_where = f"{where} > industries > {group}"
-        _require(isinstance(group, str), f"{group_where}：族群名稱應為字串")
-        _require(
+        require(isinstance(group, str), f"{group_where}：族群名稱應為字串")
+        require(
             isinstance(subcategories, list) and all(isinstance(s, str) for s in subcategories),
             f"{group_where}：子分類應為字串陣列；沒有子分類請寫 []",
         )
-        _require(len(set(subcategories)) == len(subcategories), f"{group_where}：子分類重複")
+        require(len(set(subcategories)) == len(subcategories), f"{group_where}：子分類重複")
         industries[group] = tuple(subcategories)
 
-    themes = _get(data, "themes", list, where)
-    _require(all(isinstance(t, str) for t in themes), f"{where} > themes：應為字串陣列")
-    _require(len(set(themes)) == len(themes), f"{where} > themes：題材重複")
+    themes = get_field(data, "themes", list, where)
+    require(all(isinstance(t, str) for t in themes), f"{where} > themes：應為字串陣列")
+    require(len(set(themes)) == len(themes), f"{where} > themes：題材重複")
 
     # 逐檔驗證並一次列出所有錯誤，方便一次修正
     stocks: list[StockInfo] = []
     errors: list[str] = []
     seen_codes: set[str] = set()
-    for i, item in enumerate(_get(data, "stocks", list, where)):
+    for i, item in enumerate(get_field(data, "stocks", list, where)):
         try:
             stock = _parse_stock(item, industries, themes, f"{where} > stocks[{i}]")
         except ConfigError as exc:
@@ -253,41 +253,41 @@ def _parse_stock(
     themes: list[str],
     where: str,
 ) -> StockInfo:
-    _require(isinstance(item, dict), f"{where}：應為 key: value 結構")
-    _require(
+    require(isinstance(item, dict), f"{where}：應為 key: value 結構")
+    require(
         not isinstance(item.get("code"), int),
         f"{where} > code：股票代號請加引號，例如 \"{item.get('code')}\"",
     )
-    code = _get(item, "code", str, where)
+    code = get_field(item, "code", str, where)
     where = f"{where}（{code}）"
-    _check_keys(item, _STOCK_KEYS, where)
+    check_keys(item, _STOCK_KEYS, where)
 
-    market_value = _get(item, "market", str, where)
+    market_value = get_field(item, "market", str, where)
     try:
         market = Market(market_value)
     except ValueError:
         raise ConfigError(f"{where} > market：應為 tse（上市）或 otc（上櫃），實際為 {market_value!r}") from None
 
-    industry = _get(item, "industry", str, where)
+    industry = get_field(item, "industry", str, where)
     group, _, subcategory = industry.partition("/")
-    _require(group in industries, f"{where} > industry：未知的族群「{group}」，請先在 industries 定義")
+    require(group in industries, f"{where} > industry：未知的族群「{group}」，請先在 industries 定義")
     if industries[group]:
-        _require(bool(subcategory), f"{where} > industry：族群「{group}」有子分類，必須寫到子分類，例如「{group}/{industries[group][0]}」")
-        _require(subcategory in industries[group], f"{where} > industry：族群「{group}」沒有子分類「{subcategory}」")
+        require(bool(subcategory), f"{where} > industry：族群「{group}」有子分類，必須寫到子分類，例如「{group}/{industries[group][0]}」")
+        require(subcategory in industries[group], f"{where} > industry：族群「{group}」沒有子分類「{subcategory}」")
     else:
-        _require(not subcategory, f"{where} > industry：族群「{group}」未列子分類，只能寫「{group}」")
+        require(not subcategory, f"{where} > industry：族群「{group}」未列子分類，只能寫「{group}」")
 
     stock_themes = item.get("themes", [])
-    _require(
+    require(
         isinstance(stock_themes, list) and all(isinstance(t, str) for t in stock_themes),
         f"{where} > themes：應為字串陣列",
     )
     for theme in stock_themes:
-        _require(theme in themes, f"{where} > themes：未知的題材「{theme}」，請先在 themes 定義")
+        require(theme in themes, f"{where} > themes：未知的題材「{theme}」，請先在 themes 定義")
 
     return StockInfo(
         code=code,
-        name=_get(item, "name", str, where),
+        name=get_field(item, "name", str, where),
         market=market,
         group=group,
         subcategory=subcategory or None,
@@ -295,7 +295,7 @@ def _parse_stock(
     )
 
 
-# --- 共用工具 ---------------------------------------------------------------
+# --- 共用工具（get_field、check_keys、require 也供規則驗證自己的 params）------
 
 _TYPE_NAMES: dict[type, str] = {
     int: "整數",
@@ -315,11 +315,11 @@ def _read_yaml(path: Path) -> dict[str, Any]:
             data = yaml.safe_load(f)
     except yaml.YAMLError as exc:
         raise ConfigError(f"{path} 不是合法的 YAML：{exc}") from exc
-    _require(isinstance(data, dict), f"{path}：最上層應為 key: value 結構")
+    require(isinstance(data, dict), f"{path}：最上層應為 key: value 結構")
     return data
 
 
-def _get(data: Mapping[str, Any], key: str, kind: type, where: str) -> Any:
+def get_field(data: Mapping[str, Any], key: str, kind: type, where: str) -> Any:
     """取出必要欄位並檢查型別。"""
     if key not in data:
         raise ConfigError(f"{where}：缺少必要欄位 `{key}`")
@@ -338,11 +338,11 @@ def _is_type(value: Any, kind: type) -> bool:
     return isinstance(value, kind)
 
 
-def _check_keys(data: Mapping[str, Any], allowed: set[str], where: str) -> None:
+def check_keys(data: Mapping[str, Any], allowed: set[str], where: str) -> None:
     unknown = sorted(str(k) for k in data.keys() - allowed)
-    _require(not unknown, f"{where}：未知的欄位 {', '.join(f'`{k}`' for k in unknown)}")
+    require(not unknown, f"{where}：未知的欄位 {', '.join(f'`{k}`' for k in unknown)}")
 
 
-def _require(condition: bool, message: str) -> None:
+def require(condition: bool, message: str) -> None:
     if not condition:
         raise ConfigError(message)

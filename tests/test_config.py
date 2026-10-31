@@ -46,6 +46,9 @@ def test_repo_config_loads() -> None:
         "bull_ma5_breakout",
         "range_breakout_volume",
         "ma_bull_alignment",
+        "bear_ma5_breakdown",
+        "range_breakdown",
+        "ma_bear_alignment",
     ]
     assert config.rules.exit_rules == ()
     assert config.watchlist.stocks
