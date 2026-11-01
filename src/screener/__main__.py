@@ -1,4 +1,4 @@
-"""CLI 入口：python -m screener <update|scan>（PROJECT_PLAN.md 第 12 節）。"""
+"""CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。"""
 
 import argparse
 import logging
@@ -7,8 +7,8 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
-from screener.config import ConfigError, DiscordSettings, load_config, load_secrets
-from screener.jobs import JobFailed, analyze, daily_update, intraday_scan
+from screener.config import ConfigError, DiscordSettings, load_backtest_config, load_config, load_rules, load_secrets
+from screener.jobs import JobFailed, analyze, corporate_events, daily_update, intraday_scan
 from screener.logging_setup import setup_logging
 from screener.notify.base import Notifier, NotifyError
 from screener.notify.discord import MESSAGE_LIMIT, DiscordWebhook
@@ -37,10 +37,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="輸出 DEBUG 等級的 log")
     commands = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    commands.add_parser(
+    update = commands.add_parser(
         "update",
         help="盤後更新資料庫",
         description="向 FinMind 補抓觀察清單的日 K 並寫入資料庫。",
+    )
+    update.add_argument(
+        "--since",
+        type=_parse_date,
+        metavar="YYYY-MM-DD",
+        help="把日 K 往前回補到這一天（供回測使用）；不指定時只補抓資料庫最後一筆之後的資料",
+    )
+
+    commands.add_parser(
+        "events",
+        help="抓取除權息、減資與面額變更（回測使用）",
+        description="向 FinMind 抓取觀察清單的除權息、減資與面額變更並寫入資料庫，期間涵蓋資料庫中的日 K；"
+                    "完成後以官方除權息參考價交叉驗證。",
     )
 
     scan = commands.add_parser(
@@ -56,6 +69,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="以該日日 K 當作「今日」重跑，供非交易時段測試與展示；可與 --dry-run 併用",
     )
 
+    backtest_parser = commands.add_parser(
+        "backtest",
+        help="訊號回測",
+        description="以資料庫的歷史日 K 逐日回放規則，統計訊號後的報酬並與同日觀察清單的平均比較，"
+                    "輸出終端摘要、CSV 與圖表報表（設定在 config/backtest.yaml）。需先執行 update --since 與 events。",
+    )
+    backtest_parser.add_argument("--start", type=_parse_date, metavar="YYYY-MM-DD",
+                                 help="訊號的起始日（預設為 backtest.yaml 的 signal_start）")
+    backtest_parser.add_argument("--end", type=_parse_date, metavar="YYYY-MM-DD",
+                                 help="訊號的結束日（預設為資料庫最後一天）")
+    backtest_parser.add_argument("--horizon", type=int, metavar="N",
+                                 help="終端摘要與單一天數圖表使用的持有天數（預設為 backtest.yaml 的 summary_horizon）")
+    backtest_parser.add_argument("--rules-file", type=Path, metavar="PATH",
+                                 help="改用另一份規則檔回測，不影響每日推播（預設為 config/rules.yaml）")
+    backtest_parser.add_argument("--rules", type=_parse_ids, metavar="ID,ID",
+                                 help="只回測指定的進場規則 id，以逗號分隔")
+
     analyze_parser = commands.add_parser(
         "analyze",
         help="輸出指定股票的轉折點與趨勢",
@@ -69,6 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="以該日日 K 當作「今日」（預設為資料庫最後一筆）",
     )
     return parser
+
+
+def _parse_ids(value: str) -> list[str]:
+    ids = [part.strip() for part in value.split(",") if part.strip()]
+    if not ids:
+        raise argparse.ArgumentTypeError("至少要有一個規則 id")
+    return ids
 
 
 def _parse_date(value: str) -> date:
@@ -100,9 +137,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "update":
-            daily_update.run(config, secrets)
+            daily_update.run(config, secrets, since=args.since)
+        elif args.command == "events":
+            corporate_events.run(config, secrets)
         elif args.command == "analyze":
             analyze.run(config, args.codes, as_of=args.date)
+        elif args.command == "backtest":
+            # 回測需要 plotly，延後到這裡才匯入：每日排程的 update、scan 不依賴它，少裝套件也不會失敗
+            from screener.jobs import backtest
+
+            rules_file = args.rules_file or args.config_dir / "rules.yaml"
+            backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
+                         rules=load_rules(rules_file), rules_label=str(rules_file), rule_ids=args.rules,
+                         start=args.start, end=args.end, horizon=args.horizon)
         else:
             intraday_scan.run(config, replay=args.replay, notifier=notifier)
     except ConfigError as exc:                 # 例：rules.yaml 的規則 id 或參數錯誤，建立規則時才會發現

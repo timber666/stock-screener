@@ -42,6 +42,8 @@ def test_repo_config_loads() -> None:
     assert config.settings.mis.batch_size == 50
     assert config.settings.mis.missing_price_retry == 1
     assert config.settings.finmind.timeout_sec == 30.0
+    assert config.settings.finmind.dividend_lookahead_days == 30
+    assert (config.settings.events.refetch_days, config.settings.events.reference_tolerance_pct) == (7, 0.5)
     assert config.rules.trend.pivot_ma == 5
     assert [r.id for r in config.rules.entry_rules] == [
         "bull_ma5_breakout",
@@ -188,6 +190,30 @@ def test_invalid_mis_setting_is_rejected(config_dir: Path, key: str, value: Any,
     edit_yaml(config_dir / "settings.yaml", lambda d: d["mis"].update({key: value}))
 
     with pytest.raises(ConfigError, match=f"mis > {message}"):
+        load_config(config_dir)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value", "message"),
+    [
+        ("finmind", "dividend_lookahead_days", -1, "finmind > dividend_lookahead_days：不可為負數"),
+        ("finmind", "dividend_lookahead_days", 1.5, "finmind > dividend_lookahead_days：應為整數"),
+        ("events", "refetch_days", -1, "events > refetch_days：不可為負數"),
+        ("events", "reference_tolerance_pct", 0, "events > reference_tolerance_pct：必須大於 0"),
+    ],
+)
+def test_invalid_events_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
+                                            message: str) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d[section].update({key: value}))
+
+    with pytest.raises(ConfigError, match=message):
+        load_config(config_dir)
+
+
+def test_missing_events_section_is_rejected(config_dir: Path) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d.pop("events"))
+
+    with pytest.raises(ConfigError, match="缺少必要欄位 `events`"):
         load_config(config_dir)
 
 

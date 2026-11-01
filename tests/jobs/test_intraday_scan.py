@@ -1,6 +1,7 @@
 """盤中掃描（PROJECT_PLAN.md 7.2、8.2）與回放模式（第 12 節）的完整流程。"""
 
 import io
+import logging
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date, datetime, timedelta
@@ -270,6 +271,21 @@ def test_missing_price_falls_back_to_best_bid_then_ask(history_store: SqlitePric
     (hit,) = report.hits
     assert hit.ctx.today["close"] == price and hit.price_substitute is substitute
     assert hit.change_pct == pytest.approx(price - 100.0)
+
+
+def test_requery_failure_keeps_first_quotes_and_uses_substitute(history_store: SqlitePriceStore,
+                                                                caplog: pytest.LogCaptureFixture) -> None:
+    # 第一次查詢成功、重新查詢失敗（例：MIS 盤中限流）：不中止掃描，沿用第一次的報價改用替代價（D40）
+    source = FakeQuotes([quote("1111", last=None), quote("2222")], DataSourceError("MIS 請求失敗，已重試 3 次"))
+
+    with caplog.at_level(logging.WARNING):
+        report = live_scan(history_store, [stock("1111"), stock("2222")], source, missing_price_retry=2)
+
+    assert len(source.calls) == 2                   # 失敗後不再重新查詢
+    assert sorted(codes(report.hits)) == ["1111", "2222"] and report.not_evaluated == ()
+    (hit,) = [h for h in report.hits if h.ctx.info.code == "1111"]
+    assert hit.ctx.today["close"] == 109.5 and hit.price_substitute is PriceSubstitute.BEST_BID
+    assert "重新查詢成交價失敗，沿用第一次的報價" in caplog.text
 
 
 def test_missing_price_without_bid_or_ask_is_not_evaluated(history_store: SqlitePriceStore) -> None:

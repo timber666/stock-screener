@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import pytest
@@ -9,9 +9,10 @@ from conftest import FakeResponse, FakeSession, FakeTime
 from screener.config import FinMindSettings
 from screener.data.base import DataSourceError
 from screener.data.finmind import API_URL, FinMindClient
-from screener.models import DailyBar
+from screener.models import ActionKind, CorporateAction, DailyBar, DividendEvent, DividendResult
 
-SETTINGS = FinMindSettings(timeout_sec=30, retry=2, retry_backoff_sec=5, request_interval_sec=1)
+SETTINGS = FinMindSettings(timeout_sec=30, retry=2, retry_backoff_sec=5, request_interval_sec=1,
+                           dividend_lookahead_days=30)
 START, END = date(2026, 10, 29), date(2026, 10, 30)
 
 
@@ -184,3 +185,107 @@ def test_row_with_some_non_positive_price_is_skipped_with_warning(caplog: pytest
 
     assert [b.date for b in bars] == [END]
     assert "價格不是正數" in caplog.text
+
+
+# --- 除權息、減資、面額變更（PROJECT_PLAN.md 14.2）----------------------------
+
+def dividend_row(stock_id: str = "2884", **overrides: Any) -> dict[str, Any]:
+    """TaiwanStockDividend 的一筆資料（欄位與數值取自 2884 玉山金 2024 年的實際回應，省略無關欄位）。
+
+    date 是權利分派基準日，比除權息交易日晚。
+    """
+    data = {
+        "date": "2024-08-02", "stock_id": stock_id, "year": "112年",
+        "CashExDividendTradingDate": "2024-07-25", "StockExDividendTradingDate": "2024-07-25",
+        "CashEarningsDistribution": 1.2, "CashStatutorySurplus": 0.0,
+        "StockEarningsDistribution": 0.20033197, "StockStatutorySurplus": 0.0,
+    }
+    data.update(overrides)
+    return data
+
+
+JUL = (date(2024, 7, 1), date(2024, 7, 31))
+
+
+def test_dividend_query_looks_ahead_because_api_filters_on_record_date() -> None:
+    session = FakeSession(ok())
+
+    make_client(session).fetch_dividends("2884", *JUL)
+
+    params = session.calls[0]["params"]
+    assert params["dataset"] == "TaiwanStockDividend"
+    assert (params["start_date"], params["end_date"]) == (
+        "2024-07-01", (JUL[1] + timedelta(days=SETTINGS.dividend_lookahead_days)).isoformat())
+
+
+def test_cash_and_stock_dividends_on_the_same_day_form_one_event() -> None:
+    events = make_client(FakeSession(ok(dividend_row()))).fetch_dividends("2884", *JUL)
+
+    assert events == [DividendEvent("2884", date(2024, 7, 25), 1.2, 0.20033197)]
+
+
+def test_earnings_and_surplus_distributions_are_summed() -> None:
+    # 2409 友達 2023 年的股利全部配在公積，只取盈餘那一欄會少算 100%
+    row = dividend_row("2409", CashExDividendTradingDate="2024-07-10", StockExDividendTradingDate="",
+                       CashEarningsDistribution=0.0, CashStatutorySurplus=0.8,
+                       StockEarningsDistribution=0.1, StockStatutorySurplus=0.2)
+
+    (event,) = make_client(FakeSession(ok(row))).fetch_dividends("2409", *JUL)
+
+    assert (event.cash_dividend, event.stock_dividend) == (0.8, pytest.approx(0.3))
+    assert event.date == date(2024, 7, 10)              # 股票股利的交易日空白時沿用現金股利的
+
+
+def test_cash_and_stock_on_different_days_are_separate_events() -> None:
+    row = dividend_row(CashExDividendTradingDate="2024-07-10", StockExDividendTradingDate="2024-07-24")
+
+    events = make_client(FakeSession(ok(row))).fetch_dividends("2884", *JUL)
+
+    assert events == [DividendEvent("2884", date(2024, 7, 10), 1.2, 0.0),
+                      DividendEvent("2884", date(2024, 7, 24), 0.0, 0.20033197)]
+
+
+def test_same_day_announcements_are_combined_and_out_of_range_days_dropped() -> None:
+    rows = [dividend_row(StockEarningsDistribution=0.0), dividend_row(CashEarningsDistribution=0.0),
+            dividend_row(CashExDividendTradingDate="2024-08-05", StockExDividendTradingDate="2024-08-05")]
+
+    events = make_client(FakeSession(ok(*rows))).fetch_dividends("2884", *JUL)
+
+    assert events == [DividendEvent("2884", date(2024, 7, 25), 1.2, 0.20033197)]
+
+
+def test_dividend_without_trading_date_is_skipped_with_warning(caplog: pytest.LogCaptureFixture) -> None:
+    row = dividend_row(CashExDividendTradingDate="", StockExDividendTradingDate="")
+
+    with caplog.at_level(logging.WARNING):
+        assert make_client(FakeSession(ok(row))).fetch_dividends("2884", *JUL) == []
+
+    assert "沒有除權息交易日" in caplog.text
+
+
+def test_dividend_results_capital_reductions_and_splits() -> None:
+    result = {"date": "2025-12-11", "stock_id": "2330", "before_price": 1505.0, "after_price": 1499.99,
+              "stock_and_cache_dividend": 5.000011, "stock_or_cache_dividend": "息"}
+    reduction = {"date": "2022-09-19", "stock_id": "2603", "ClosingPriceonTheLastTradingDay": 80.8,
+                 "PostReductionReferencePrice": 187.0, "ReasonforCapitalReduction": "Cash refund"}
+    split = {"date": "2025-08-25", "stock_id": "2327", "type": "面額變更", "before_price": 546.0,
+             "after_price": 136.5}
+    session = FakeSession(ok(result), ok(reduction), ok(split))
+    client = make_client(session)
+    year = (date(2021, 1, 1), date(2026, 10, 30))
+
+    assert client.fetch_dividend_results("2330", *year) == [
+        DividendResult("2330", date(2025, 12, 11), 1505.0, 1499.99)]
+    assert client.fetch_capital_reductions("2603", *year) == [
+        CorporateAction("2603", date(2022, 9, 19), ActionKind.CAPITAL_REDUCTION, 80.8, 187.0)]
+    assert client.fetch_splits(*year) == [CorporateAction("2327", date(2025, 8, 25), ActionKind.SPLIT, 546.0, 136.5)]
+    assert "data_id" not in session.calls[2]["params"]          # 面額變更不分股票，一次查全市場
+
+
+def test_action_without_positive_prices_is_skipped(caplog: pytest.LogCaptureFixture) -> None:
+    split = {"date": "2025-08-25", "stock_id": "2327", "type": "", "before_price": 0.0, "after_price": 136.5}
+
+    with caplog.at_level(logging.WARNING):
+        assert make_client(FakeSession(ok(split))).fetch_splits(date(2025, 1, 1), date(2025, 12, 31)) == []
+
+    assert "前後價格不是正數" in caplog.text

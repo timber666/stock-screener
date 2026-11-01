@@ -33,6 +33,16 @@ def test_help_runs_as_module() -> None:
     assert "scan" in result.stdout
 
 
+def test_daily_commands_do_not_need_plotly() -> None:
+    # 每日排程只執行 update 與 scan；plotly 只有 backtest 需要，未安裝時 CLI 仍要能啟動
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys, screener.__main__; print('plotly' in sys.modules)"],
+        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+    )
+
+    assert result.stdout.strip() == "False"
+
+
 def test_invalid_replay_date_is_rejected() -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["scan", "--replay", "2026-13-01"])

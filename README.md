@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M5（Discord 推播、錯誤通知與排程），待交易日實測。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
+> 🚧 開發中：已完成 M6（訊號回測）；M4、M5 的盤中掃描與排程待交易日實測。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 
 ## 架構
 
@@ -43,7 +43,8 @@ pip install -e ".[dev]"
 |---|---|
 | `config/watchlist.yaml` | 觀察清單與族群（附範例，請換成自己的清單） |
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
-| `config/settings.yaml` | 資料庫與 log 路徑、回補天數、FinMind、MIS 與 Discord 的請求頻率、逾時與重試 |
+| `config/backtest.yaml` | 訊號回測的期間、持有天數、交易成本等；只有 `backtest` 會讀取 |
+| `config/settings.yaml` | 資料庫與 log 路徑、回補天數；FinMind、MIS、Discord 與證交所 ISIN 清單的請求頻率、逾時與重試；`events` 的重查天數與交叉驗證門檻 |
 | `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
 設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類，都會直接報錯並指出位置。
@@ -63,6 +64,7 @@ python -m screener --help
 | `python -m screener scan --dry-run` | 只印在終端，不推播 |
 | `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑並推播（標題標示「回放」），供非交易時段測試與展示；加 `--dry-run` 只印在終端 |
 | `python -m screener analyze 2330 2454` | 印出轉折點、基本趨勢與破位修正後的趨勢，供檢查分析結果；`--date` 指定「今日」 |
+| `python -m screener backtest` | 訊號回測：統計每條規則觸發後的報酬，輸出摘要、CSV 與圖表報表 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
 
@@ -92,6 +94,33 @@ powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 - 以目前使用者身分執行，電腦須開機且已登入；執行時會出現命令列視窗。
 - 錯過的 update（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
 - 國定假日照常觸發，scan 會判定為非交易日後結束。
+
+### 訊號回測（`backtest`）
+
+以歷史日 K 逐日回放規則（收盤 K 棒），統計每條規則觸發後持有 1、3、5、10、20 日的報酬，並與同一天整個觀察清單的平均比較（超額報酬）。只看進場訊號、不模擬交易。定義見 [PROJECT_PLAN.md](PROJECT_PLAN.md) 14.1。
+
+第一次使用前先準備資料，之後只需偶爾執行 `events` 補上新的除權息：
+
+```bash
+python -m screener update --since 2020-06-01
+```
+
+```bash
+python -m screener events
+```
+
+`update --since` 把日 K 往前回補（每檔一次請求，約 5 分鐘）。`events` 抓取除權息、減資與面額變更（每檔三次請求，免費方案每小時約可查 200 檔，超過上限時中止，一小時後重新執行會從中斷處繼續，當天已查過的股票不會重複查詢），以及證交所 ISIN 清單的上市日／上櫃日，完成後以官方的除權息參考價交叉驗證。
+
+```bash
+python -m screener backtest
+```
+
+- 290 檔、約 6 年的資料以多個行程平行計算，約 5 分鐘。
+- 報酬以還原權息後的價格計算（有官方除權息結果時以官方前後價格為準）；判斷訊號仍用未還原價格，與每日推播一致，另以還原價重算一次作為對照。
+- 掛牌（上市日／上櫃日）前的興櫃交易與掛牌後前五個交易日沒有漲跌幅限制，不產生訊號、也不列入基準。不在證交所清單中的股票（例：已下市）無法排除，照常回測並在 log 警告。
+- 2025 年以前為觀察段、之後為驗證段；同時列出去重（同檔同規則 5 個交易日內只算第一次）、排除收盤漲跌停鎖死、排除計算區間內有跳空事件的結果。
+- 輸出到 `data/backtest/`：`signals.csv`（每個訊號一列）、`summary.csv`（所有分組的統計）、`report.html`（總覽熱圖、觀察段 vs 驗證段、累積超額報酬、最大有利／不利幅度，用瀏覽器開啟）。
+- `--rules-file` 用另一份規則檔回測，不影響每日推播；`--rules` 只回測指定的規則；`--horizon` 改變摘要使用的持有天數。
 
 ## 選股規則
 

@@ -44,8 +44,46 @@ def store(tmp_path: Path):
         yield store
 
 
-def run_update(stocks: list[StockInfo], source: FakeSource, store: SqlitePriceStore):
-    return update_prices(stocks, source=source, store=store, today=TODAY, backfill_days=BACKFILL_DAYS)
+def run_update(stocks: list[StockInfo], source: FakeSource, store: SqlitePriceStore, since: date | None = None):
+    return update_prices(stocks, source=source, store=store, today=TODAY, backfill_days=BACKFILL_DAYS, since=since)
+
+
+# --- 往前回補（--since）------------------------------------------------------
+
+SINCE = date(2020, 6, 1)
+
+
+def test_since_extends_history_backwards_in_one_request(store: SqlitePriceStore) -> None:
+    store.upsert_bars([bar("2330", date(2026, 10, 27))])
+    source = FakeSource([bar("2330", SINCE), bar("2330", date(2026, 10, 27)), bar("2330", TODAY)])
+
+    summary = run_update([stock("2330")], source, store, since=SINCE)
+
+    assert source.calls == [("2330", SINCE, TODAY)]
+    assert [b.date for b in store.get_bars("2330")] == [SINCE, date(2026, 10, 27), TODAY]
+    assert (summary.extended, summary.backfilled) == (["2330"], [])
+
+
+def test_since_already_covered_only_fetches_new_days(store: SqlitePriceStore) -> None:
+    store.upsert_bars([bar("2330", SINCE), bar("2330", date(2026, 10, 27))])
+    source = FakeSource()
+
+    summary = run_update([stock("2330")], source, store, since=SINCE)
+
+    assert source.calls == [("2330", date(2026, 10, 28), TODAY)]
+    assert summary.extended == []
+
+
+def test_since_replaces_backfill_days_for_new_stock(store: SqlitePriceStore) -> None:
+    source = FakeSource([bar("2330", SINCE)])
+
+    summary = run_update([stock("2330")], source, store, since=SINCE)
+
+    assert source.calls == [("2330", SINCE, TODAY)]
+    assert summary.backfilled == ["2330"]
+
+
+# --- 一般更新 ---------------------------------------------------------------
 
 
 def test_new_stock_is_backfilled(store: SqlitePriceStore) -> None:

@@ -6,16 +6,25 @@ finmind:
   retry: 3                    # 連線失敗、逾時或伺服器錯誤時的重試次數
   retry_backoff_sec: 5        # 第 n 次重試前等待 n × 此秒數
   request_interval_sec: 1     # 兩次請求的最短間隔；免費方案上限為每小時 600 次
+  dividend_lookahead_days: 30 # 股利資料以權利分派基準日篩選（比除權息交易日晚 6～10 天），查詢迄日往後放寬的天數
 mis:
   timeout_sec: 10
   retry: 3
   retry_backoff_sec: 3
   request_interval_sec: 3     # 請求太頻繁可能被暫時封鎖 IP
   batch_size: 50              # 每次請求的股票數；實測 150 檔可以，290 檔會因網址過長被拒（HTTP 414）
-  missing_price_retry: 1      # 成交價為 "-"（該時點沒有成交）時重新查詢的次數，仍為 "-" 就改用最佳買價
+  missing_price_retry: 1      # 成交價為 "-"（該時點沒有成交）時重新查詢的次數，仍為 "-" 就依序改用最佳買價、最佳賣價
   missing_price_wait_sec: 5   # 重新查詢前等待的秒數
 discord:
   timeout_sec: 10
   retry: 3                    # 連線失敗、逾時、伺服器錯誤或被限流（HTTP 429）時的重試次數
   retry_backoff_sec: 5        # 被限流時改等 Discord 指定的秒數
   request_interval_sec: 1     # 多則訊息之間的間隔
+isin:                         # 證交所 ISIN 清單（上市日／上櫃日），events 指令使用
+  timeout_sec: 60             # 上市清單約 10 MB
+  retry: 3
+  retry_backoff_sec: 5
+  request_interval_sec: 1
+events:                       # events 指令（除權息、減資、面額變更）
+  refetch_days: 7             # 已查過的股票，從上次查詢的迄日往前重疊幾天再查，補上較晚公告的資料
+  reference_tolerance_pct: 0.5  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列在 log

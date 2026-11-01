@@ -7,6 +7,7 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class RequestSettings:
-    """HTTP 請求的逾時、重試與間隔，FinMind 與 MIS 共用。"""
+    """HTTP 請求的逾時、重試與間隔，FinMind、MIS、Discord、證交所 ISIN 共用。"""
 
     timeout_sec: float
     retry: int                      # 連線失敗、逾時或伺服器錯誤時的重試次數
@@ -32,7 +33,7 @@ class RequestSettings:
 
 @dataclass(frozen=True)
 class FinMindSettings(RequestSettings):
-    pass
+    dividend_lookahead_days: int    # 股利資料的查詢迄日往後放寬的天數（以權利分派基準日篩選，14.2）
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,19 @@ class DiscordSettings(RequestSettings):
 
 
 @dataclass(frozen=True)
+class IsinSettings(RequestSettings):
+    pass
+
+
+@dataclass(frozen=True)
+class EventsSettings:
+    """events 指令（PROJECT_PLAN.md 14.2）。"""
+
+    refetch_days: int               # 已查過的股票，從上次查詢的迄日往前重疊幾天再查
+    reference_tolerance_pct: float  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列出
+
+
+@dataclass(frozen=True)
 class Settings:
     db_path: Path
     log_dir: Path
@@ -55,6 +69,8 @@ class Settings:
     finmind: FinMindSettings
     mis: MisSettings
     discord: DiscordSettings
+    isin: IsinSettings
+    events: EventsSettings
 
 
 @dataclass(frozen=True)
@@ -87,6 +103,32 @@ class Watchlist:
 
 
 @dataclass(frozen=True)
+class CostConfig:
+    commission_pct: float           # 手續費率（%），買賣各收一次
+    commission_discount: float      # 手續費折扣，例 0.28 = 2.8 折；1 = 不打折
+    tax_pct: float                  # 證交稅（%），賣出時收
+
+    @property
+    def round_trip_pct(self) -> float:
+        """一買一賣的總成本（%）。"""
+        return self.commission_pct * self.commission_discount * 2 + self.tax_pct
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    """訊號回測（PROJECT_PLAN.md 14.1）。"""
+
+    signal_start: date              # 訊號從這天起算
+    validation_start: date          # 驗證段的第一天；之前為觀察段
+    horizons: tuple[int, ...]       # 持有交易日數，由小到大
+    summary_horizon: int            # 終端摘要與單一天數圖表使用的持有天數
+    dedupe_days: int                # 同檔同規則距離上次計入不到幾個交易日的訊號不計（去重）
+    gap_flag_pct: float             # 計算區間內單次價格調整幅度達此值（%）的事件標記為跳空事件
+    cost: CostConfig
+    output_dir: Path
+
+
+@dataclass(frozen=True)
 class AppConfig:
     settings: Settings
     watchlist: Watchlist
@@ -103,7 +145,7 @@ def load_config(config_dir: Path) -> AppConfig:
     return AppConfig(
         settings=_load_settings(config_dir / "settings.yaml"),
         watchlist=_load_watchlist(config_dir / "watchlist.yaml"),
-        rules=_load_rules(config_dir / "rules.yaml"),
+        rules=load_rules(config_dir / "rules.yaml"),
     )
 
 
@@ -125,12 +167,16 @@ def load_secrets(env_file: Path) -> Secrets:
 def _load_settings(path: Path) -> Settings:
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis", "discord"}, where)
+    check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis", "discord", "isin", "events"}, where)
 
     finmind_where = f"{where} > finmind"
     finmind_data = get_field(data, "finmind", dict, where)
-    check_keys(finmind_data, _REQUEST_KEYS, finmind_where)
-    finmind = FinMindSettings(**_parse_request_settings(finmind_data, finmind_where))
+    check_keys(finmind_data, _REQUEST_KEYS | {"dividend_lookahead_days"}, finmind_where)
+    finmind = FinMindSettings(
+        **_parse_request_settings(finmind_data, finmind_where),
+        dividend_lookahead_days=get_field(finmind_data, "dividend_lookahead_days", int, finmind_where),
+    )
+    require(finmind.dividend_lookahead_days >= 0, f"{finmind_where} > dividend_lookahead_days：不可為負數")
 
     mis_where = f"{where} > mis"
     mis_data = get_field(data, "mis", dict, where)
@@ -150,6 +196,21 @@ def _load_settings(path: Path) -> Settings:
     check_keys(discord_data, _REQUEST_KEYS, discord_where)
     discord = DiscordSettings(**_parse_request_settings(discord_data, discord_where))
 
+    isin_where = f"{where} > isin"
+    isin_data = get_field(data, "isin", dict, where)
+    check_keys(isin_data, _REQUEST_KEYS, isin_where)
+    isin = IsinSettings(**_parse_request_settings(isin_data, isin_where))
+
+    events_where = f"{where} > events"
+    events_data = get_field(data, "events", dict, where)
+    check_keys(events_data, {"refetch_days", "reference_tolerance_pct"}, events_where)
+    events = EventsSettings(
+        refetch_days=get_field(events_data, "refetch_days", int, events_where),
+        reference_tolerance_pct=get_field(events_data, "reference_tolerance_pct", float, events_where),
+    )
+    require(events.refetch_days >= 0, f"{events_where} > refetch_days：不可為負數")
+    require(events.reference_tolerance_pct > 0, f"{events_where} > reference_tolerance_pct：必須大於 0")
+
     settings = Settings(
         db_path=Path(get_field(data, "db_path", str, where)),
         log_dir=Path(get_field(data, "log_dir", str, where)),
@@ -157,6 +218,8 @@ def _load_settings(path: Path) -> Settings:
         finmind=finmind,
         mis=mis,
         discord=discord,
+        isin=isin,
+        events=events,
     )
     require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
     return settings
@@ -182,7 +245,8 @@ def _parse_request_settings(data: Mapping[str, Any], where: str) -> dict[str, An
 
 # --- rules.yaml -------------------------------------------------------------
 
-def _load_rules(path: Path) -> RulesConfig:
+def load_rules(path: Path) -> RulesConfig:
+    """rules.yaml 格式的規則檔；回測可另外指定一份（D35）。"""
     data = _read_yaml(path)
     where = path.name
     check_keys(data, {"trend", "filters", "entry_rules", "exit_rules"}, where)
@@ -227,6 +291,49 @@ def _parse_rule_list(data: Mapping[str, Any], key: str, where: str) -> tuple[Rul
         seen.add(rule.id)
         rules.append(rule)
     return tuple(rules)
+
+
+# --- backtest.yaml ----------------------------------------------------------
+
+def load_backtest_config(path: Path) -> BacktestConfig:
+    """只有 backtest 指令會載入，寫錯時不影響每日的掃描與更新。"""
+    data = _read_yaml(path)
+    where = path.name
+    check_keys(data, {"signal_start", "validation_start", "horizons", "summary_horizon", "dedupe_days",
+                      "gap_flag_pct", "cost", "output_dir"}, where)
+
+    horizons = get_field(data, "horizons", list, where)
+    require(bool(horizons) and all(isinstance(h, int) and not isinstance(h, bool) and h > 0 for h in horizons),
+            f"{where} > horizons：應為正整數陣列")
+    require(horizons == sorted(set(horizons)), f"{where} > horizons：應由小到大且不重複")
+
+    cost_where = f"{where} > cost"
+    cost_data = get_field(data, "cost", dict, where)
+    check_keys(cost_data, {"commission_pct", "commission_discount", "tax_pct"}, cost_where)
+    cost = CostConfig(
+        commission_pct=get_field(cost_data, "commission_pct", float, cost_where),
+        commission_discount=get_field(cost_data, "commission_discount", float, cost_where),
+        tax_pct=get_field(cost_data, "tax_pct", float, cost_where),
+    )
+    require(cost.commission_pct >= 0, f"{cost_where} > commission_pct：不可為負數")
+    require(0 < cost.commission_discount <= 1, f"{cost_where} > commission_discount：應大於 0 且不超過 1")
+    require(cost.tax_pct >= 0, f"{cost_where} > tax_pct：不可為負數")
+
+    config = BacktestConfig(
+        signal_start=get_field(data, "signal_start", date, where),
+        validation_start=get_field(data, "validation_start", date, where),
+        horizons=tuple(horizons),
+        summary_horizon=get_field(data, "summary_horizon", int, where),
+        dedupe_days=get_field(data, "dedupe_days", int, where),
+        gap_flag_pct=get_field(data, "gap_flag_pct", float, where),
+        cost=cost,
+        output_dir=Path(get_field(data, "output_dir", str, where)),
+    )
+    require(config.validation_start > config.signal_start, f"{where} > validation_start：應晚於 signal_start")
+    require(config.summary_horizon in config.horizons, f"{where} > summary_horizon：應為 horizons 其中之一")
+    require(config.dedupe_days >= 0, f"{where} > dedupe_days：不可為負數")
+    require(config.gap_flag_pct > 0, f"{where} > gap_flag_pct：必須大於 0")
+    return config
 
 
 # --- watchlist.yaml ---------------------------------------------------------
@@ -314,6 +421,7 @@ _TYPE_NAMES: dict[type, str] = {
     str: "字串",
     list: "陣列",
     dict: "key: value 結構",
+    date: "日期（YYYY-MM-DD）",
 }
 
 

@@ -85,6 +85,7 @@ def test_body_pct() -> None:
         (1000, 1500, 1.5, True),            # 剛好 1.5 倍
         (1000, 1499, 1.5, False),
         (100, 110, 1.1, True),              # 100 × 1.1 直接相乘會得到 110.00000000000001
+        (0, 800, 1.5, False),               # 昨日 0 張：算不出量比，不成立（D39）
     ],
 )
 def test_volume_spike(prev_volume: int, volume: int, ratio: float, expected: bool) -> None:

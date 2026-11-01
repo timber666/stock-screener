@@ -1,0 +1,13 @@
+# 訊號回測（PROJECT_PLAN.md 14.1）。只有 python -m screener backtest 會讀取這個檔案。
+# 日 K 要先回補到 signal_start 之前約半年（update --since 2020-06-01），讓每個訊號都有完整的計算區間。
+signal_start: 2021-01-01        # 訊號從這天起算
+validation_start: 2025-01-01    # 驗證段的第一天：之前為觀察段，可據以調整參數；之後只用來驗證
+horizons: [1, 3, 5, 10, 20]     # 持有交易日數
+summary_horizon: 5              # 終端摘要與單一天數圖表使用的持有天數（--horizon 可改）
+dedupe_days: 5                  # 去重：同檔同規則距離上次計入不到幾個交易日的訊號不計
+gap_flag_pct: 3.0               # 訊號日之前的計算區間內，單次價格調整幅度達此值（%）的除權息、減資、面額變更標記為跳空事件
+cost:
+  commission_pct: 0.1425        # 手續費率（%），買賣各收一次
+  commission_discount: 1.0      # 手續費折扣，例 0.28 = 2.8 折；1 = 不打折
+  tax_pct: 0.3                  # 證交稅（%），賣出時收
+output_dir: data/backtest       # 輸出 signals.csv、summary.csv、report.html（不進版控）

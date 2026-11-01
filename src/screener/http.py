@@ -69,8 +69,8 @@ class HttpClient:
                  **kwargs: Any) -> T:
         """送出請求並以 read 解讀回應。
 
-        連線失敗、逾時與 read 拋出的 RetryableError 會重試；read 拋出的其他錯誤直接往外拋。
-        label 用於 log 與錯誤訊息，例："FinMind TaiwanStockPrice 2330"。
+        連線失敗、逾時、回應傳到一半連線中斷（例：下載 10 MB 的 ISIN 清單時）與 read 拋出的 RetryableError
+        會重試；read 拋出的其他錯誤直接往外拋。label 用於 log 與錯誤訊息，例："FinMind TaiwanStockPrice 2330"。
         """
         attempts = self._settings.retry + 1
         for attempt in range(1, attempts + 1):
@@ -79,7 +79,7 @@ class HttpClient:
             try:
                 response = self._session.request(method, url, timeout=self._settings.timeout_sec, **kwargs)
                 return read(response)
-            except (requests.ConnectionError, requests.Timeout) as exc:
+            except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as exc:
                 error = f"連線失敗：{self._mask(str(exc))}"
             except RetryableError as exc:
                 error, retry_after = str(exc), exc.retry_after

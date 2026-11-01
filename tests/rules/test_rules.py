@@ -152,6 +152,13 @@ def test_e2_requires_every_condition(kwargs: dict) -> None:
     assert E2.evaluate(e2_context(**kwargs)) is None
 
 
+def test_e2_does_not_trigger_when_yesterday_volume_is_zero() -> None:
+    # 昨日不到 500 股會四捨五入成 0 張（例：掛牌前最後一天的興櫃交易）：算不出量比，不觸發（D39）
+    ctx = make_context(set_bar(e2_context().bars, -2, volume=0), trend=Trend.RANGE)
+
+    assert E2.evaluate(ctx) is None
+
+
 def test_e2_prior_high_window_is_last_40_bars() -> None:
     ctx = e2_context()
     ctx = make_context(set_bar(ctx.bars, -42, high=200.0), trend=Trend.RANGE)    # 第 41 根前，不在區間內

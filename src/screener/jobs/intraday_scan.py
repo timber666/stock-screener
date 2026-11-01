@@ -148,7 +148,10 @@ def _retry_missing_prices(
     today: date,
     sleep: Callable[[float], None],
 ) -> None:
-    """今日有成交、但成交價為 "-"（該時點沒有成交）的股票，等待後重新查詢並更新 quotes（8.2）。"""
+    """今日有成交、但成交價為 "-"（該時點沒有成交）的股票，等待後重新查詢並更新 quotes（8.2）。
+
+    重新查詢失敗時（重試後仍失敗）不中止掃描，沿用第一次的報價，之後改用替代價（D40）。
+    """
     for attempt in range(1, settings.missing_price_retry + 1):
         pending = [stock for stock in stocks if (quote := quotes.get(stock.code)) is not None
                    and quote.date == today and quote.open is not None and quote.last is None]
@@ -157,7 +160,11 @@ def _retry_missing_prices(
         logger.info("%d 檔目前沒有成交價，%g 秒後重新查詢（%d/%d）：%s", len(pending), settings.missing_price_wait_sec,
                     attempt, settings.missing_price_retry, "、".join(stock.code for stock in pending))
         sleep(settings.missing_price_wait_sec)
-        quotes.update(_fetch_quotes(source, pending))
+        try:
+            quotes.update(source.fetch_quotes(pending))
+        except DataSourceError as exc:
+            logger.warning("重新查詢成交價失敗，沿用第一次的報價（沒有成交價的改用替代價）：%s", exc)
+            return
 
 
 def _prev_close_matches(quote: Quote, history: Sequence[DailyBar]) -> bool:

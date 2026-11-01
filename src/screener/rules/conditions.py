@@ -52,8 +52,8 @@ def volume_ratio(ctx: StockContext) -> float | None:
 
 
 def is_volume_spike(ctx: StockContext, ratio: float) -> bool:
-    """爆量：今日成交量 ≥ 昨日成交量 × ratio。"""
-    if ctx.yesterday is None:
+    """爆量：今日成交量 ≥ 昨日成交量 × ratio。昨日成交量為 0 時算不出量比，視為不成立（D23、D39）。"""
+    if ctx.yesterday is None or ctx.yesterday["volume"] <= 0:
         return False
     return bool(ctx.today["volume"] >= normalize(ctx.yesterday["volume"] * ratio))
 

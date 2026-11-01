@@ -68,11 +68,12 @@ def make_context(bars: pd.DataFrame, trend: Trend = Trend.UNKNOWN, info: StockIn
 
 class FakeResponse:
     def __init__(self, status_code: int = 200, body: Any = None, text: str | None = None,
-                 headers: dict[str, str] | None = None) -> None:
+                 headers: dict[str, str] | None = None, content: bytes | None = None) -> None:
         self.status_code = status_code
         self._body = body
         self.text = json.dumps(body) if text is None else text
         self.headers = headers or {}
+        self.content = self.text.encode("utf-8") if content is None else content
 
     def json(self) -> Any:
         if self._body is None:

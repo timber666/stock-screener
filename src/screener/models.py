@@ -83,6 +83,51 @@ class DailyBar:
 
 
 @dataclass(frozen=True)
+class Listing:
+    """證交所 ISIN 清單記載的掛牌資訊（PROJECT_PLAN.md 14.2、D38）。"""
+
+    code: str
+    market: Market
+    listed_on: date                 # 在目前市場掛牌的日子（上櫃轉上市者為轉上市日）
+
+
+@dataclass(frozen=True)
+class DividendEvent:
+    """除權息事件（PROJECT_PLAN.md 14.2）。股利為盈餘配發與公積配發的合計。"""
+
+    code: str
+    date: date                      # 除權息交易日（原定日期；遇休市時，還原計算順延到下一個交易日）
+    cash_dividend: float            # 現金股利（元／股）
+    stock_dividend: float           # 股票股利（元／股，以面額 10 元計，即每 10 股配發的股數）
+
+
+class ActionKind(str, Enum):
+    CAPITAL_REDUCTION = "capital_reduction"     # 減資
+    SPLIT = "split"                             # 面額變更、分割、反分割
+
+
+@dataclass(frozen=True)
+class CorporateAction:
+    """減資或面額變更、分割、反分割（PROJECT_PLAN.md 14.2）。調整因子直接取官方公告的 after_price / before_price。"""
+
+    code: str
+    date: date
+    kind: ActionKind
+    before_price: float             # 事件前一日收盤價
+    after_price: float              # 事件後參考價
+
+
+@dataclass(frozen=True)
+class DividendResult:
+    """官方公告的除權息前後價格（PROJECT_PLAN.md 14.2）。還原時優先使用（D37），並用來交叉驗證股利資料。"""
+
+    code: str
+    date: date                      # 除權息交易日
+    before_price: float             # 除權息前一日收盤價
+    after_price: float              # 除權息參考價
+
+
+@dataclass(frozen=True)
 class Quote:
     """盤中即時報價（MIS 快照，PROJECT_PLAN.md 8.2）。MIS 沒有值（"-"）的欄位為 None。"""
 
