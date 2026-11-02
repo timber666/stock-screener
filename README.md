@@ -130,6 +130,37 @@ python -m screener backtest
 - 輸出到 `data/backtest/`：`signals.csv`（每個訊號一列）、`summary.csv`（所有分組的統計）、`report.html`（總覽熱圖、觀察段 vs 驗證段、累積超額報酬、最大有利／不利幅度，用瀏覽器開啟）。
 - `--rules-file` 用另一份規則檔回測，不影響每日推播；`--rules` 只回測指定的規則；`--horizon` 改變摘要使用的持有天數。
 
+#### 定期更新（建議每月一次）
+
+日 K 每天由排程的 `update` 自動補上，除權息與回測統計要手動更新。回測涵蓋 2021 年至今，一個月只讓驗證段多約 20 個交易日（約 4%），數字變動很小，每月更新一次就夠；訊號成績單的「M6 驗證段」也是讀這裡的 `summary.csv`。
+
+建議在每月第一個週六下午執行：週報（10:00）已經跑完，也避開 13:10 的盤中掃描與 21:00 `update` 使用的 FinMind 額度。依序執行：
+
+```bash
+python -m screener events
+```
+
+`events` 約需 870 次請求，超過免費方案每小時 600 次的上限，第一次會中途停下。一小時後再執行一次同一個指令，會從中斷處繼續；log 出現「事件更新結果」且沒有「抓取失敗」才算完成。接著：
+
+```bash
+python -m screener backtest
+```
+
+- 先 `events` 再 `backtest`：回測只會還原到 `events` 最後一次執行的那天，順序相反時，近期的除權息會被當成下跌（摘要開頭會提醒）。
+- `backtest` 會覆寫 `data/backtest/`；想保留上一次的結果對照，先把整個資料夾複製一份。
+- 驗證段只用來檢查，不要依更新後的驗證段結果調整參數（[PROJECT_PLAN.md](PROJECT_PLAN.md) D32）。
+
+不等到月初、要立即重跑的情況：
+
+- 修改 `rules.yaml` 或想試新規則、新參數：先用 `--rules-file` 另一份規則檔回測，確認後再改 `rules.yaml`，改完再跑一次正式的 `backtest`，讓成績單對照的是新規則的結果。
+- 觀察清單新增股票：新股票只有 `update` 回補的一年日 K，先往前回補，再依序執行 `events`、`backtest`：
+
+  ```bash
+  python -m screener update --since 2020-06-01
+  ```
+
+- 除權息旺季（每年 6～9 月）結束後：事件多，9 月底更新一次，讓近期訊號的報酬正確還原。
+
 ### 訊號成績單（`signal-report`）
 
 每週整理 `scan` 實際推播的訊號（每天只用第一次推播），回答兩個問題：13:10 推播的訊號到收盤還成立嗎？推播後的表現如何？定義見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.1。
