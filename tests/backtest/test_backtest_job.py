@@ -119,6 +119,25 @@ def test_run_writes_report_and_files(config, tmp_path: Path) -> None:
     assert set(summary["判斷價格"]) == {"未還原", "還原"}
     html = (tmp_path / "out" / "report.html").read_text(encoding="utf-8")
     assert html.count("<h2>") == 4 and "plotly" in html.lower()
+    assert "⚠️" not in text                         # 事件資料涵蓋到最後一根日 K，不提醒
+
+
+def test_stale_events_are_warned_but_backtest_still_runs(config, tmp_path: Path,
+                                                        caplog: pytest.LogCaptureFixture) -> None:
+    # 1111 的事件只查到倒數第二根日 K 那天：最後一天若有除權息不會還原，提醒先執行 events，但照常回測（D41）
+    queried_until = RISES.index[-2]
+    with SqlitePriceStore(tmp_path / "screener.db") as store:
+        store.set_event_coverage("1111", EventCoverage(RISES.index[0], queried_until))
+    out = io.StringIO()
+
+    with caplog.at_level(logging.WARNING):
+        result = run(config, replace(BACKTEST, output_dir=tmp_path / "out"), rules=CONFIG.rules,
+                     rules_label="rules.yaml", rule_ids=None, start=None, end=None, horizon=None, out=out, workers=1)
+
+    message = f"1 檔的除權息與公司行動只查到 {queried_until}，日 K 已到 {RISES.index[-1]}"
+    assert f"⚠️ {message}" in out.getvalue() and "請先執行 events 再回測" in out.getvalue()
+    assert message in caplog.text and caplog.text.rstrip().endswith("：1111")
+    assert len(result.signals) == 1 and (tmp_path / "out" / "report.html").is_file()
 
 
 def test_run_requires_events_for_every_stock(config, tmp_path: Path) -> None:

@@ -24,7 +24,8 @@ _SIDE_LABELS = {side.value: side.label for side in Side}
 # --- 終端摘要 ---------------------------------------------------------------
 
 def format_summary(result: "BacktestResult", backtest: BacktestConfig, horizon: int, observed: int,
-                   rules_label: str, output_dir: Path) -> str:
+                   rules_label: str, output_dir: Path, warnings: Sequence[str] = ()) -> str:
+    """warnings：資料方面的提醒（例：除權息資料沒有涵蓋到最新的日 K），列在開頭的說明之後。"""
     signals, summary = result.signals, result.summary
     kept = int(signals["kept"].sum()) if len(signals) else 0
     lines = [
@@ -33,6 +34,7 @@ def format_summary(result: "BacktestResult", backtest: BacktestConfig, horizon: 
         f"觀察清單 {observed} 檔｜訊號 {len(signals):,} 個（去重後 {kept:,}）｜規則檔 {rules_label}｜"
         f"來回成本 {backtest.cost.round_trip_pct:.3f}%",
         "報酬以還原權息的收盤價計算；勝率 = 方向報酬 > 0 的比例；超額 = 減去同日觀察清單的平均報酬（空方同樣反向）",
+        *(f"⚠️ {warning}" for warning in warnings),
         "",
         f"■ 持有 {horizon} 日（去重，排除漲跌停鎖死）",
     ]

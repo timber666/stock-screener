@@ -7,7 +7,7 @@
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import date
@@ -20,6 +20,7 @@ from screener.backtest.signals import (StockHistory, add_flags, add_returns, ded
                                        forward_returns, load_history)
 from screener.backtest.stats import OBSERVE, VALIDATE, summarize
 from screener.config import AppConfig, BacktestConfig, ConfigError, RulesConfig, TrendConfig
+from screener.data.base import EventCoverage
 from screener.engine import Engine
 from screener.jobs import JobFailed, open_existing_store
 from screener.models import Side
@@ -52,8 +53,9 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
         stocks = [s for s in config.watchlist.stocks if first_bars[s.code] is not None]
         if no_bars := [s.code for s in config.watchlist.stocks if first_bars[s.code] is None]:
             logger.warning("%d 檔資料庫沒有日 K，不列入回測：%s", len(no_bars), "、".join(no_bars))
+        coverages = {s.code: store.event_coverage(s.code) for s in stocks}
         missing = [s.code for s in stocks
-                   if (c := store.event_coverage(s.code)) is None or first_bars[s.code] < c.start]
+                   if (c := coverages[s.code]) is None or first_bars[s.code] < c.start]
         if missing:
             raise JobFailed(f"{len(missing)} 檔尚未查詢除權息與公司行動，無法還原權息，"
                             f"請先執行 events：{'、'.join(missing[:20])}{' 等' if len(missing) > 20 else ''}")
@@ -64,6 +66,7 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
         histories = [load_history(store, store, s) for s in stocks]
     if not histories:
         raise JobFailed("資料庫沒有任何日 K，請先執行 update")
+    warnings = stale_events_warnings(histories, coverages)
 
     start = start or backtest.signal_start
     end = end or max(h.bars.index[-1] for h in histories)
@@ -76,8 +79,21 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
     write_csv(result, backtest, output_dir)
     write_html(result, backtest, horizon, output_dir / "report.html")
     (out or sys.stdout).write(format_summary(result, backtest, horizon, len(histories), rules_label,
-                                             output_dir) + "\n")
+                                             output_dir, warnings=warnings) + "\n")
     return result
+
+
+def stale_events_warnings(histories: Sequence[StockHistory], coverages: Mapping[str, EventCoverage]) -> list[str]:
+    """事件資料只查到上次執行 events 的那天，之後的日 K 若有除權息、減資不會還原，報酬與漲跌停、跳空標記
+    可能有誤。只提醒、照常回測（D41）；回傳要印在終端摘要的提醒，代號寫入 log。"""
+    stale = [h for h in histories if coverages[h.info.code].end < h.bars.index[-1]]
+    if not stale:
+        return []
+    message = (f"{len(stale)} 檔的除權息與公司行動只查到 {min(coverages[h.info.code].end for h in stale)}，"
+               f"日 K 已到 {max(h.bars.index[-1] for h in stale)}：之後的除權息、減資沒有還原，報酬與漲跌停、"
+               f"跳空標記可能有誤，請先執行 events 再回測")
+    logger.warning("%s：%s", message, "、".join(h.info.code for h in stale))
+    return [message]
 
 
 def build_engine(rules: RulesConfig, rule_ids: Sequence[str] | None) -> Engine:
