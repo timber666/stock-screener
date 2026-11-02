@@ -13,7 +13,7 @@ mis:
   retry_backoff_sec: 3
   request_interval_sec: 3     # 請求太頻繁可能被暫時封鎖 IP
   batch_size: 50              # 每次請求的股票數；實測 150 檔可以，290 檔會因網址過長被拒（HTTP 414）
-  missing_price_retry: 1      # 成交價為 "-"（該時點沒有成交）時重新查詢的次數，仍為 "-" 就依序改用最佳買價、最佳賣價
+  missing_price_retry: 1      # 拿不到成交價（z 與最後一筆成交 trade.z 都是 "-"）時重新查詢的次數，仍沒有就依序改用最佳買價、最佳賣價
   missing_price_wait_sec: 5   # 重新查詢前等待的秒數
 discord:
   timeout_sec: 10

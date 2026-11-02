@@ -136,7 +136,7 @@ class Quote:
     open: float | None              # None：今日尚無成交
     high: float | None
     low: float | None
-    last: float | None              # 最新成交價；None：該時點沒有成交
+    last: float | None              # 最新成交價（MIS 的 z，為 "-" 時用最後一筆成交 trade.z，D47）；None：兩者都沒有
     prev_close: float | None        # 參考價（昨收；除權息日為除權息參考價）
     volume: int | None              # 累積成交量（張），只含一般交易
     best_bid: float | None          # 最佳買價第一檔；跌停鎖死時沒有買單

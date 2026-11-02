@@ -6,6 +6,10 @@
 - 代號或市場前綴錯誤時，該檔回傳 `c` 為空字串的資料，無法對應到代號。
 - 價格為 "2370.0000" 形式的字串，沒有值時為 "-"；`v` 為累積成交量（張），只含一般交易；
   `b`／`a` 為最佳五檔買／賣價，以 _ 分隔。跌停鎖死時 `b` 為 "-"，漲停鎖死時 `a` 為 "-"。
+
+盤中實測（2026-11-02 13:10）：`z` 是最近一次更新的成交價，那次更新只有掛單變動、沒有成交時為 "-"
+（290 檔中 265 檔）；最後一筆成交記在 `trade`（`z` 價格、`t` 時間、`v` 張數），因此現價依序取 `z`、
+`trade.z`（D47）。`pz` 同樣為 "-"，不使用。
 """
 
 import logging
@@ -92,7 +96,7 @@ def _parse_record(record: Mapping[str, Any]) -> Quote:
             open=_price(record["o"]),
             high=_price(record["h"]),
             low=_price(record["l"]),
-            last=_price(record["z"]),
+            last=_last_price(record),
             prev_close=_price(record["y"]),
             volume=None if record["v"] in ("", _NO_VALUE) else int(record["v"]),
             best_bid=_first_level(record["b"]),
@@ -101,8 +105,16 @@ def _parse_record(record: Mapping[str, Any]) -> Quote:
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise DataSourceError(f"MIS {code} 的報價格式不符（{exc}）：{dict(record)!r}") from exc
     if quote.last is None:
-        logger.debug("MIS %s 成交價為 -：%r", code, dict(record))     # 供盤中實測時檢查其他欄位
+        logger.debug("MIS %s 沒有成交價（z 與 trade.z 都沒有值）：%r", code, dict(record))
     return quote
+
+
+def _last_price(record: Mapping[str, Any]) -> float | None:
+    """最新成交價：`z` 為 "-"（最近一次更新只有掛單變動）時改用最後一筆成交 `trade.z`（D47）。"""
+    price = _price(record["z"])
+    if price is None and isinstance(trade := record.get("trade"), Mapping):
+        price = _price(trade.get("z", _NO_VALUE))
+    return price
 
 
 def _price(value: str) -> float | None:

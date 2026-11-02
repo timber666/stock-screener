@@ -148,7 +148,7 @@ def _retry_missing_prices(
     today: date,
     sleep: Callable[[float], None],
 ) -> None:
-    """今日有成交、但成交價為 "-"（該時點沒有成交）的股票，等待後重新查詢並更新 quotes（8.2）。
+    """今日有成交、但拿不到成交價（MIS 的 z 與 trade.z 都是 "-"）的股票，等待後重新查詢並更新 quotes（8.2）。
 
     重新查詢失敗時（重試後仍失敗）不中止掃描，沿用第一次的報價，之後改用替代價（D40）。
     """

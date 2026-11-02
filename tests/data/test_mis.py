@@ -2,6 +2,9 @@
 
 tests/fixtures/mis_20261030.json 是實際回應（2026-10-31 週六查詢，回傳 10/30 收盤後的資料），
 依序為 2330 台積電、2308 台達電（跌停鎖死，沒有買單）、6488 環球晶（上櫃），以及不存在的代號 9999。
+
+tests/fixtures/mis_20261102_1312.json 是盤中的實際回應（2026-11-02 13:12:36）：2330、2308 的 `z` 有值；
+2317、2454、6488、3105、6221 的 `z` 為 "-"（最近一次更新只有掛單變動），最後一筆成交記在 `trade`。
 """
 
 import copy
@@ -22,6 +25,7 @@ from screener.models import Market, Quote, StockInfo
 SETTINGS = MisSettings(timeout_sec=10, retry=2, retry_backoff_sec=3, request_interval_sec=3, batch_size=50,
                        missing_price_retry=1, missing_price_wait_sec=5)
 REAL_BODY: dict[str, Any] = json.loads((FIXTURES_DIR / "mis_20261030.json").read_text(encoding="utf-8"))
+INTRADAY_BODY: dict[str, Any] = json.loads((FIXTURES_DIR / "mis_20261102_1312.json").read_text(encoding="utf-8"))
 
 
 def stock(code: str, market: Market = Market.TSE) -> StockInfo:
@@ -84,12 +88,39 @@ def test_stocks_are_queried_in_batches_spaced_by_request_interval() -> None:
 
 def test_dash_means_no_value() -> None:
     no_trade = record("2330", o="-", h="-", l="-", z="-", v="-", b="-", a="-")
+    del no_trade["trade"]
 
     quote = make_client(FakeSession(body(no_trade))).fetch_quotes([stock("2330")])["2330"]
 
     fields = (quote.open, quote.high, quote.low, quote.last, quote.volume, quote.best_bid, quote.best_ask)
     assert fields == (None,) * 7
     assert quote.prev_close == 2415.0
+
+
+def test_last_price_falls_back_to_last_trade_during_session() -> None:
+    # 盤中 z 為 "-" 只代表最近一次更新沒有成交；最後一筆成交在 trade.z（D47）
+    stocks = [stock("2330"), stock("2317"), stock("2454"), stock("6488", Market.OTC)]
+
+    quotes = make_client(FakeSession(FakeResponse(200, INTRADAY_BODY))).fetch_quotes(stocks)
+
+    assert quotes["2330"].last == 2340.0                 # z 有值時直接使用
+    assert quotes["2317"].last == 251.0                  # z 為 "-"，最後一筆成交 13:12:05
+    assert quotes["2454"].last == 4010.0                 # 最後一筆成交在 13:08:46，仍是最新的成交價
+    assert (quotes["6488"].last, quotes["6488"].best_bid) == (752.0, 753.0)   # 買價可能高於最後成交價
+
+
+@pytest.mark.parametrize("trade", [{"t": "13:10:00", "v": 1, "z": "-", "ft": 20}, None],
+                         ids=["trade-without-price", "no-trade-field"])
+def test_no_last_price_when_neither_z_nor_trade_has_one(trade: dict[str, Any] | None) -> None:
+    no_price = record("2330", z="-")
+    if trade is None:
+        del no_price["trade"]
+    else:
+        no_price["trade"] = trade
+
+    quote = make_client(FakeSession(body(no_price))).fetch_quotes([stock("2330")])["2330"]
+
+    assert quote.last is None and quote.best_bid == 2365.0   # 盤中掃描再改用替代價（8.2）
 
 
 def test_records_for_codes_not_requested_are_ignored() -> None:
