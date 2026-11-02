@@ -1,9 +1,10 @@
 """核心資料型別（PROJECT_PLAN.md 10.1）。"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -141,6 +142,16 @@ class Quote:
     volume: int | None              # 累積成交量（張），只含一般交易
     best_bid: float | None          # 最佳買價第一檔；跌停鎖死時沒有買單
     best_ask: float | None          # 最佳賣價第一檔；漲停鎖死時沒有賣單
+    raw: Mapping[str, Any] | None = field(default=None, compare=False, repr=False)  # MIS 原始資料列，供存檔（D46）
+
+    def current_price(self) -> tuple[float | None, "PriceSubstitute | None"]:
+        """盤中的現價與替代來源（不是替代值時為 None）：成交價，沒有時依序改用最佳買價、最佳賣價的第一檔
+        （跌停鎖死時沒有買單，賣價即跌停價，D28）。三者都沒有時現價為 None。"""
+        for price, substitute in ((self.last, None), (self.best_bid, PriceSubstitute.BEST_BID),
+                                  (self.best_ask, PriceSubstitute.BEST_ASK)):
+            if price is not None:
+                return price, substitute
+        return None, None
 
 
 class PriceSubstitute(str, Enum):
@@ -214,3 +225,36 @@ class ScanReport:
     not_evaluated: tuple[str, ...]  # 當日沒有 K 棒（回放）或無成交、無報價（盤中）而未評估的代號
     scan_time: str | None = None    # 盤中掃描時間，例 "13:10"；回放為 None
     prev_close_mismatch: tuple[str, ...] = ()   # MIS 參考價與資料庫昨收不一致的代號（盤中，7.2）
+    substituted: tuple[str, ...] = ()           # 現價為替代值（最佳買價／賣價）的代號（盤中，8.2）
+    quotes: tuple[Quote, ...] = ()              # MIS 回傳的全部報價（盤中；重新查詢的以新的取代），供記錄快照
+
+
+@dataclass(frozen=True)
+class ScanRun:
+    """一次實際推播的盤中掃描（D45）。只記錄推播成功的 scan，不含 --dry-run 與 --replay。"""
+
+    day: date
+    scanned_at: datetime            # 掃描開始的時間（本機時間），即訊息標題的時間
+    rules_fingerprint: str          # 規則檔解析後內容的雜湊（config.rules_fingerprint）
+    observed: int                   # 觀察清單檔數
+    evaluated: int
+    not_evaluated: int
+    substituted: int                # 現價為替代值的檔數
+    prev_close_mismatch: int
+    raw_file: str | None            # MIS 原始資料的壓縮檔（D46）
+    id: int | None = None           # 寫入資料庫後才有
+
+
+@dataclass(frozen=True)
+class SignalRecord:
+    """推播的一個訊號：一檔股票觸發的一條進場規則（RESEARCH_PLAN.md 4.1）。"""
+
+    code: str
+    rule_id: str
+    rule_name: str
+    side: Side
+    trend: Trend
+    price: float                    # 推播時的現價（暫定 K 棒的收盤）
+    price_substitute: PriceSubstitute | None    # 現價為替代值時的來源
+    change_pct: float | None        # 漲跌幅（%），以 MIS 參考價計算
+    detail: str                     # 例："量比 1.80x，突破 40 日高 123.5"

@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M6（訊號回測）；M4、M5 的盤中掃描與排程待交易日實測。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
+> 🚧 開發中：已完成 M6（訊號回測）與 M5（推播與排程）；M7（訊號紀錄與每週成績單）實作完成、待交易日驗證。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
 
 ## 架構
 
@@ -34,8 +34,10 @@ python -m venv .venv
 啟用虛擬環境（Windows 用 `.venv\Scripts\activate`，macOS／Linux 用 `source .venv/bin/activate`）後安裝：
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,research]"
 ```
+
+`research` 是研究功能（`backtest` 的圖表報表）需要的套件；只跑每日的 `update`、`scan` 時可以只裝 `pip install -e .`。
 
 ## 設定
 
@@ -43,9 +45,10 @@ pip install -e ".[dev]"
 |---|---|
 | `config/watchlist.yaml` | 觀察清單與族群（附範例，請換成自己的清單） |
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
+| `config/settings.yaml` | 資料庫、log 與 MIS 原始快照的路徑、回補天數；FinMind、MIS、Discord 的請求頻率、逾時與重試 |
 | `config/backtest.yaml` | 訊號回測的期間、持有天數、交易成本等；只有 `backtest` 會讀取 |
-| `config/settings.yaml` | 資料庫與 log 路徑、回補天數；FinMind、MIS、Discord 與證交所 ISIN 清單的請求頻率、逾時與重試；`events` 的重查天數與交叉驗證門檻 |
-| `.env` | FinMind token、Discord webhook URL；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
+| `config/research.yaml` | 研究指令的設定：`events` 的重查天數與交叉驗證門檻、證交所 ISIN 清單的請求設定、訊號成績單的持有天數與輸出位置；只有 `events`、`signal-report` 會讀取，寫錯不影響每日的 `update`、`scan` |
+| `.env` | FinMind token、Discord webhook URL（`DISCORD_WEBHOOK_URL` 每日選股、`DISCORD_RESEARCH_WEBHOOK_URL` 研究的定期報告，建議另開一個頻道）；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
 設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類，都會直接報錯並指出位置。
 
@@ -65,6 +68,7 @@ python -m screener --help
 | `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑並推播（標題標示「回放」），供非交易時段測試與展示；加 `--dry-run` 只印在終端 |
 | `python -m screener analyze 2330 2454` | 印出轉折點、基本趨勢與破位修正後的趨勢，供檢查分析結果；`--date` 指定「今日」 |
 | `python -m screener backtest` | 訊號回測：統計每條規則觸發後的報酬，輸出摘要、CSV 與圖表報表 |
+| `python -m screener signal-report` | 訊號成績單：上一週推播的訊號，收盤是否仍成立與之後的表現，推播到研究頻道；`--end` 指定期間的最後一天，`--dry-run` 只印在終端 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
 
@@ -75,6 +79,7 @@ python -m screener --help
 - 結果超過 Discord 單則 2000 字時依族群拆成多則；`--dry-run` 印出時以「──── 第 1/2 則 ────」分隔。
 - 執行失敗（MIS 無法連線、資料庫不存在、`rules.yaml` 錯誤等）時推送「❌ 盤中選股執行失敗」與原因，避免誤以為只是沒有訊號。
 - 未設定 `DISCORD_WEBHOOK_URL` 時無法推播，以結束碼 2 結束；只想看結果請加 `--dry-run`。
+- 推播成功後把這次掃描記錄到資料庫：執行紀錄、推播的每個訊號、約 290 檔的報價快照；MIS 原始資料另存 `data/snapshots/`（每次一個壓縮檔，約 45 KB）。`--dry-run` 與 `--replay` 不記錄。紀錄供每週的訊號成績單使用。
 
 ### 盤後更新（`update`）
 
@@ -89,10 +94,11 @@ python -m screener --help
 powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 ```
 
-註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00` 調整，`-Unregister` 移除。
+註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00），以及每週六 10:00 的研究工作 `stock-screener-weekly`（`signal-report`）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00 -WeeklyTime 09:00` 調整，`-Unregister` 移除。
 
 - 以目前使用者身分執行，電腦須開機且已登入；執行時會出現命令列視窗。
-- 錯過的 update（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
+- 錯過的 update、weekly（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
+- weekly 推播到研究頻道，失敗時錯誤通知也推到研究頻道，不影響每日的 scan、update。
 - 國定假日照常觸發，scan 會判定為非交易日後結束。
 
 ### 訊號回測（`backtest`）
@@ -123,6 +129,21 @@ python -m screener backtest
 - 2025 年以前為觀察段、之後為驗證段；同時列出去重（同檔同規則 5 個交易日內只算第一次）、排除收盤漲跌停鎖死、排除計算區間內有跳空事件的結果。
 - 輸出到 `data/backtest/`：`signals.csv`（每個訊號一列）、`summary.csv`（所有分組的統計）、`report.html`（總覽熱圖、觀察段 vs 驗證段、累積超額報酬、最大有利／不利幅度，用瀏覽器開啟）。
 - `--rules-file` 用另一份規則檔回測，不影響每日推播；`--rules` 只回測指定的規則；`--horizon` 改變摘要使用的持有天數。
+
+### 訊號成績單（`signal-report`）
+
+每週整理 `scan` 實際推播的訊號（每天只用第一次推播），回答兩個問題：13:10 推播的訊號到收盤還成立嗎？推播後的表現如何？定義見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.1。
+
+```bash
+python -m screener signal-report --dry-run
+```
+
+- 期間為上一週的週一到週五（`--end` 指定期間的最後一天）；需要 `update` 已寫入期間內的日 K。
+- 盤中 vs 收盤：以收盤 K 棒與目前的 `rules.yaml` 重算訊號，同一天、同一檔、同一規則比對；推播時的規則檔不同時會標註。
+- 報酬以 13:10 的現價進場，持有到該週最後一個交易日收盤（本週），以及持有 1、5 日（累積，天數在 `research.yaml`）；空方取負號。基準為同一天所有有快照的股票以 13:10 現價進場的平均。
+- 除權息：持有期間內某天的 MIS 參考價與前一日收盤不同時，以兩者的比例調整；沒有快照的日子改用 `events` 抓取的事件資料。
+- 有 M6 回測結果（`data/backtest/summary.csv`）時，累積的每條規則附上 M6 驗證段的平均超額報酬作為參考。
+- 輸出：推播到研究頻道（`DISCORD_RESEARCH_WEBHOOK_URL`，未設定時以結束碼 2 結束；`--dry-run` 除外），以及每個訊號一列的明細 `data/research/signal_report/<期間最後一天>.csv`。
 
 ## 選股規則
 

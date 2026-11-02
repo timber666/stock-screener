@@ -2,26 +2,33 @@
 
 盤中模式以 MIS 快照合成今日暫定 K 棒，接在資料庫的歷史日 K 之後；回放模式（--replay）以資料庫中
 該日（含）以前的日 K 建立 StockContext，該日 K 棒視為「今日」。結果推播到 Discord，--dry-run 時只印在終端。
+
+盤中模式推播成功後，寫入執行紀錄、訊號與報價快照，MIS 原始資料另存壓縮檔（D45、D46）；
+--dry-run 與回放不寫入。
 """
 
+import gzip
+import json
 import logging
 import sys
 import time
 from collections.abc import Callable, Sequence
 from datetime import date, datetime
+from pathlib import Path
 from typing import TextIO
 
 from screener.analysis.context import bars_to_frame, build_context
 from screener.analysis.numeric import normalize
-from screener.config import AppConfig, MisSettings, TrendConfig
+from screener.config import AppConfig, MisSettings, TrendConfig, rules_fingerprint
 from screener.data.base import DataSourceError, PriceStore, QuoteSource
 from screener.data.mis import MisClient
 from screener.engine import Engine
 from screener.jobs import JobFailed, open_existing_store
-from screener.models import DailyBar, Hit, PriceSubstitute, Quote, ScanReport, Side, StockContext, StockInfo
+from screener.models import (DailyBar, Hit, PriceSubstitute, Quote, ScanReport, ScanRun, Side, SignalRecord,
+                             StockContext, StockInfo)
 from screener.notify.base import Notifier, NotifyError
 from screener.notify.discord import MESSAGE_LIMIT
-from screener.notify.message import format_messages
+from screener.notify.message import format_for_terminal, format_messages
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +38,23 @@ def run(config: AppConfig, *, replay: date | None, notifier: Notifier | None, ou
     """結果推播到 notifier；notifier 為 None 時（--dry-run）印到 out（預設 stdout）。
 
     超過單則上限時依族群拆成多則（第 11 節）。now 預設為目前時間，盤中模式以它判斷「今天」。
+    盤中模式推播成功後才寫入訊號紀錄（D45）；寫入失敗時已推播的訊息不受影響，job 以失敗結束。
     """
     engine = Engine.from_config(config.rules)
     stocks, trend_config = config.watchlist.stocks, config.rules.trend
+    now = now or datetime.now()
     with open_existing_store(config.settings.db_path) as store:
         if replay is not None:
             report = replay_scan(stocks, store=store, engine=engine, trend_config=trend_config, day=replay)
         else:
             report = intraday_scan(stocks, source=MisClient(config.settings.mis), store=store, engine=engine,
-                                   trend_config=trend_config, settings=config.settings.mis, now=now or datetime.now())
+                                   trend_config=trend_config, settings=config.settings.mis, now=now)
     if report is None:                          # 非交易日：直接結束，不推播
         return
 
     messages = format_messages(report, config.watchlist.industries, MESSAGE_LIMIT)
     if notifier is None:
-        _print_messages(messages, out or sys.stdout)
+        (out or sys.stdout).write(format_for_terminal(messages))
         return
     for i, message in enumerate(messages, start=1):
         try:
@@ -53,13 +62,51 @@ def run(config: AppConfig, *, replay: date | None, notifier: Notifier | None, ou
         except NotifyError as exc:
             raise JobFailed(f"推播失敗（第 {i}/{len(messages)} 則）：{exc}") from exc
     logger.info("已推播 Discord：%d 則", len(messages))
+    if not report.is_replay:
+        record_scan(config, report, scanned_at=now)
 
 
-def _print_messages(messages: Sequence[str], out: TextIO) -> None:
-    """多則時以分隔線標示每一則的範圍，方便確認拆分結果。"""
-    if len(messages) > 1:
-        messages = [f"──── 第 {i}/{len(messages)} 則 ────\n{message}" for i, message in enumerate(messages, start=1)]
-    out.write("\n\n".join(messages) + "\n")
+def record_scan(config: AppConfig, report: ScanReport, *, scanned_at: datetime) -> int:
+    """寫入執行紀錄、訊號與報價快照（D45），原始資料另存壓縮檔（D46），回傳執行紀錄的 id。
+
+    先寫壓縮檔，再在同一個交易內寫入資料庫，任何一步失敗時資料庫都不會留下不完整的紀錄。
+    """
+    try:
+        raw_file = write_raw_snapshot(config.settings.snapshot_dir, report, scanned_at=scanned_at)
+        run = ScanRun(day=report.day, scanned_at=scanned_at, rules_fingerprint=rules_fingerprint(config.rules),
+                      observed=report.observed, evaluated=report.observed - len(report.not_evaluated),
+                      not_evaluated=len(report.not_evaluated), substituted=len(report.substituted),
+                      prev_close_mismatch=len(report.prev_close_mismatch), raw_file=raw_file.as_posix())
+        signals = signal_records(report)
+        with open_existing_store(config.settings.db_path) as store:
+            run_id = store.record_scan(run, signals, report.quotes)
+    except Exception as exc:
+        logger.exception("訊號紀錄寫入失敗")
+        raise JobFailed(f"已推播 Discord，但訊號紀錄寫入失敗（{type(exc).__name__}: {exc}）") from exc
+    logger.info("已寫入訊號紀錄 #%d：訊號 %d 個、報價快照 %d 檔，原始資料 %s", run_id, len(signals),
+                len(report.quotes), raw_file)
+    return run_id
+
+
+def signal_records(report: ScanReport) -> list[SignalRecord]:
+    """推播內容中的每個訊號（一檔股票觸發的一條進場規則）一筆。"""
+    return [
+        SignalRecord(code=hit.ctx.info.code, rule_id=signal.rule_id, rule_name=signal.rule_name, side=hit.side,
+                     trend=hit.ctx.trend, price=float(hit.ctx.today["close"]), price_substitute=hit.price_substitute,
+                     change_pct=hit.change_pct, detail=signal.detail)
+        for hit in report.hits for signal in hit.signals
+    ]
+
+
+def write_raw_snapshot(directory: Path, report: ScanReport, *, scanned_at: datetime) -> Path:
+    """MIS 回傳的原始資料列（每檔約 40 個欄位）存成 gzip 壓縮的 JSON，檔名為掃描時間（D46）。"""
+    path = directory / f"{scanned_at:%Y-%m-%d_%H%M%S}.json.gz"
+    content = {"date": report.day.isoformat(), "scanned_at": scanned_at.isoformat(timespec="seconds"),
+               "records": [quote.raw for quote in report.quotes if quote.raw is not None]}
+    directory.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(content, f, ensure_ascii=False)
+    return path
 
 
 # --- 盤中 -------------------------------------------------------------------
@@ -129,7 +176,8 @@ def intraday_scan(
                 len(mismatched), *_side_counts(hits))
     return ScanReport(day=today, is_replay=False, observed=len(stocks), hits=tuple(hits),
                       not_evaluated=tuple(not_evaluated), scan_time=now.strftime("%H:%M"),
-                      prev_close_mismatch=tuple(mismatched))
+                      prev_close_mismatch=tuple(mismatched), substituted=tuple(substituted),
+                      quotes=tuple(quotes.values()))
 
 
 def _fetch_quotes(source: QuoteSource, stocks: Sequence[StockInfo]) -> dict[str, Quote]:
@@ -182,14 +230,12 @@ def _tentative_bar(quote: Quote, today: date) -> tuple[DailyBar | None, PriceSub
     """
     if quote.open is None or quote.high is None or quote.low is None or quote.volume is None:
         return None, None
-    candidates = [(quote.last, None), (quote.best_bid, PriceSubstitute.BEST_BID),
-                  (quote.best_ask, PriceSubstitute.BEST_ASK)]
-    for price, substitute in candidates:
-        if price is not None:
-            bar = DailyBar(code=quote.code, date=today, open=quote.open, high=quote.high, low=quote.low,
-                           close=price, volume=quote.volume)
-            return bar, substitute
-    return None, None
+    price, substitute = quote.current_price()
+    if price is None:
+        return None, None
+    bar = DailyBar(code=quote.code, date=today, open=quote.open, high=quote.high, low=quote.low, close=price,
+                   volume=quote.volume)
+    return bar, substitute
 
 
 def _change_from_reference(price: float, reference: float | None) -> float | None:

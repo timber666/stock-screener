@@ -1,4 +1,7 @@
-"""組成推播訊息（PROJECT_PLAN.md 第 11 節）。"""
+"""組成推播訊息（PROJECT_PLAN.md 第 11 節）。
+
+Section 與 pack_sections 是通用的拆分方式，研究的定期報告（RESEARCH_PLAN.md 4.1）也使用。
+"""
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -25,7 +28,7 @@ def format_messages(report: ScanReport, industries: Mapping[str, tuple[str, ...]
     依族群拆分：一個族群盡量放在同一則；單一族群就超過上限時，才在族群內逐檔拆開。
     從方向或族群的中間開始的一則，開頭補上「━━ 空方 ━━（續）」「▍PCB（續）」。
     """
-    return _pack(_sections(report, industries), limit)
+    return pack_sections(_sections(report, industries), limit)
 
 
 def format_failure(title: str, detail: str, log_file: Path | None, limit: int) -> str:
@@ -43,10 +46,17 @@ def text_length(text: str) -> int:
     return len(text.encode("utf-16-le")) // 2
 
 
+def format_for_terminal(messages: Sequence[str]) -> str:
+    """--dry-run 印在終端的內容：多則時以「──── 第 1/2 則 ────」標示每一則的範圍，方便確認拆分結果。"""
+    if len(messages) > 1:
+        messages = [f"──── 第 {i}/{len(messages)} 則 ────\n{message}" for i, message in enumerate(messages, start=1)]
+    return "\n\n".join(messages) + "\n"
+
+
 # --- 區塊 -------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class _Section:
+class Section:
     """訊息中的一個區塊（標題、一個族群、底部彙總）。拆成多則時，盡量整個區塊放在同一則。"""
 
     head: tuple[str, ...]
@@ -60,14 +70,14 @@ class _Section:
         return [*self.head, *(line for item in self.items for line in item), *self.tail]
 
 
-def _sections(report: ScanReport, industries: Mapping[str, tuple[str, ...]]) -> list[_Section]:
-    sections = [_Section(head=(_header(report), ""))]
+def _sections(report: ScanReport, industries: Mapping[str, tuple[str, ...]]) -> list[Section]:
+    sections = [Section(head=(_header(report), ""))]
     for side in Side:
         side_hits = tuple(hit for hit in report.hits if hit.side is side)
         side_line = f"━━ {side.label} ━━"
         for i, (group, hits) in enumerate(_group_hits(side_hits, industries)):
             group_line = f"▍{group}"
-            sections.append(_Section(
+            sections.append(Section(
                 head=(side_line, group_line) if i == 0 else (group_line,),
                 items=tuple(tuple(_hit_lines(hit)) for hit in hits),
                 tail=("",),
@@ -75,8 +85,8 @@ def _sections(report: ScanReport, industries: Mapping[str, tuple[str, ...]]) -> 
                 resume_inside=(f"{side_line}（續）", f"{group_line}（續）"),
             ))
     if not report.hits:
-        sections.append(_Section(head=("今日無符合標的", "")))
-    sections.append(_Section(head=(), items=tuple((line,) for line in _footer(report))))
+        sections.append(Section(head=("今日無符合標的", "")))
+    sections.append(Section(head=(), items=tuple((line,) for line in _footer(report))))
     return sections
 
 
@@ -136,7 +146,12 @@ def _change(pct: float) -> str:
 
 # --- 拆成多則 ---------------------------------------------------------------
 
-def _pack(sections: Sequence[_Section], limit: int) -> list[str]:
+def pack_sections(sections: Sequence[Section], limit: int) -> list[str]:
+    """把區塊依序放進每則不超過 limit 字（UTF-16）的訊息。
+
+    一個區塊盡量放在同一則；放不下時從新的一則開始（開頭補上 resume）；單一區塊就超過上限時，
+    在 items 之間拆開（新的一則開頭補上 resume_inside）；單一行就超過上限時直接切開。
+    """
     messages: list[list[str]] = [[]]
 
     def fits(lines: Sequence[str]) -> bool:

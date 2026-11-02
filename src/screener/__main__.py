@@ -1,4 +1,8 @@
-"""CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。"""
+"""CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。
+
+研究指令（events、backtest、signal-report）的程式在執行該指令時才匯入：每日排程的 update、scan
+不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
+"""
 
 import argparse
 import logging
@@ -7,8 +11,9 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
-from screener.config import ConfigError, DiscordSettings, load_backtest_config, load_config, load_rules, load_secrets
-from screener.jobs import JobFailed, analyze, corporate_events, daily_update, intraday_scan
+from screener.config import (AppConfig, ConfigError, DiscordSettings, Secrets, load_backtest_config, load_config,
+                             load_research_config, load_rules, load_secrets)
+from screener.jobs import JobFailed, analyze, daily_update, intraday_scan
 from screener.logging_setup import setup_logging
 from screener.notify.base import Notifier, NotifyError
 from screener.notify.discord import MESSAGE_LIMIT, DiscordWebhook
@@ -86,6 +91,16 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_parser.add_argument("--rules", type=_parse_ids, metavar="ID,ID",
                                  help="只回測指定的進場規則 id，以逗號分隔")
 
+    report_parser = commands.add_parser(
+        "signal-report",
+        help="訊號成績單：一週內推播的訊號，收盤是否仍成立與之後的表現（推播到研究頻道）",
+        description="讀取 scan 記錄的訊號與報價快照，以收盤 K 棒重算訊號比對一致性，並以 13:10 現價計算之後的報酬，"
+                    "推播到研究頻道（DISCORD_RESEARCH_WEBHOOK_URL）並輸出明細 CSV（設定在 config/research.yaml）。",
+    )
+    report_parser.add_argument("--end", type=_parse_date, metavar="YYYY-MM-DD",
+                               help="期間的最後一天，期間為該週的週一到這一天（預設為上一週的週五）")
+    report_parser.add_argument("--dry-run", action="store_true", help="只印在終端，不推播")
+
     analyze_parser = commands.add_parser(
         "analyze",
         help="輸出指定股票的轉折點與趨勢",
@@ -130,7 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     secrets = load_secrets(ENV_FILE)
     try:
-        notifier = _notifier(args, config.settings.discord, secrets.discord_webhook_url)
+        notifier = _notifier(args, config.settings.discord, secrets)
     except ConfigError as exc:
         logger.error("設定錯誤：%s", exc)
         return EXIT_CONFIG_ERROR
@@ -138,20 +153,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "update":
             daily_update.run(config, secrets, since=args.since)
-        elif args.command == "events":
-            corporate_events.run(config, secrets)
+        elif args.command == "scan":
+            intraday_scan.run(config, replay=args.replay, notifier=notifier)
         elif args.command == "analyze":
             analyze.run(config, args.codes, as_of=args.date)
-        elif args.command == "backtest":
-            # 回測需要 plotly，延後到這裡才匯入：每日排程的 update、scan 不依賴它，少裝套件也不會失敗
-            from screener.jobs import backtest
-
-            rules_file = args.rules_file or args.config_dir / "rules.yaml"
-            backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
-                         rules=load_rules(rules_file), rules_label=str(rules_file), rule_ids=args.rules,
-                         start=args.start, end=args.end, horizon=args.horizon)
         else:
-            intraday_scan.run(config, replay=args.replay, notifier=notifier)
+            _run_research(args, config, secrets, notifier)
     except ConfigError as exc:                 # 例：rules.yaml 的規則 id 或參數錯誤，建立規則時才會發現
         logger.error("設定檔錯誤：%s", exc)
         _notify_failure(notifier, args, started_at, f"設定檔錯誤：{exc}", log_file)
@@ -167,13 +174,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_OK
 
 
-def _notifier(args: argparse.Namespace, settings: DiscordSettings, webhook_url: str | None) -> Notifier | None:
-    """scan 推播結果與錯誤通知；update 只推錯誤通知（D30）；analyze 與 --dry-run 不推播。"""
+def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets, notifier: Notifier | None) -> None:
+    """研究指令：程式與研究設定在這裡才匯入、載入（PROJECT_PLAN.md 10.4）。"""
+    if args.command == "events":
+        from screener.jobs import corporate_events
+
+        corporate_events.run(config, load_research_config(args.config_dir / "research.yaml"), secrets)
+    elif args.command == "signal-report":
+        from screener.jobs import signal_report
+
+        signal_report.run(config, load_research_config(args.config_dir / "research.yaml"), end=args.end,
+                          notifier=notifier)
+    else:
+        from screener.jobs import backtest      # 需要研究套件 plotly
+
+        rules_file = args.rules_file or args.config_dir / "rules.yaml"
+        backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
+                     rules=load_rules(rules_file), rules_label=str(rules_file), rule_ids=args.rules,
+                     start=args.start, end=args.end, horizon=args.horizon)
+
+
+def _notifier(args: argparse.Namespace, settings: DiscordSettings, secrets: Secrets) -> Notifier | None:
+    """scan 推播結果與錯誤通知；update 只推錯誤通知（D30）；signal-report 的結果與錯誤通知都推到研究頻道（D43）；
+    其餘指令與 --dry-run 不推播。"""
+    if args.command == "signal-report":
+        if args.dry_run:
+            return None
+        if not secrets.discord_research_webhook_url:
+            raise ConfigError("未設定 DISCORD_RESEARCH_WEBHOOK_URL（.env），無法推播成績單；"
+                              "只要在終端查看請加上 --dry-run")
+        return DiscordWebhook(settings, secrets.discord_research_webhook_url, env_name="DISCORD_RESEARCH_WEBHOOK_URL")
+
     pushes_results = args.command == "scan" and not args.dry_run
     if not (pushes_results or args.command == "update"):
         return None
-    if webhook_url:
-        return DiscordWebhook(settings, webhook_url)
+    if secrets.discord_webhook_url:
+        return DiscordWebhook(settings, secrets.discord_webhook_url)
     if pushes_results:
         raise ConfigError("未設定 DISCORD_WEBHOOK_URL（.env），無法推播；只要在終端查看結果請加上 --dry-run")
     logger.warning("未設定 DISCORD_WEBHOOK_URL（.env），失敗時不會推送錯誤通知")
@@ -187,6 +223,8 @@ def _notify_failure(notifier: Notifier | None, args: argparse.Namespace, started
         return
     if args.command == "update":
         job = "盤後更新"
+    elif args.command == "signal-report":
+        job = "訊號成績單"
     else:
         job = f"回放 {args.replay}" if args.replay else "盤中選股"
     title = f"{job}執行失敗（{started_at:%Y-%m-%d %H:%M}）"

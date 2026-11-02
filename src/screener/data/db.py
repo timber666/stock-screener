@@ -1,13 +1,14 @@
-"""以 SQLite 實作 PriceStore 與 EventStore（PROJECT_PLAN.md 8.3、14.2）。"""
+"""以 SQLite 實作 PriceStore、EventStore 與 ScanStore（PROJECT_PLAN.md 8.3、14.2）。"""
 
 import sqlite3
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import TracebackType
 
 from screener.data.base import EventCoverage
-from screener.models import ActionKind, CorporateAction, DailyBar, DividendEvent, DividendResult, Listing, Market
+from screener.models import (ActionKind, CorporateAction, DailyBar, DividendEvent, DividendResult, Listing, Market,
+                             PriceSubstitute, Quote, ScanRun, Side, SignalRecord, Trend)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS daily_prices (
@@ -51,6 +52,45 @@ CREATE TABLE IF NOT EXISTS event_coverage (
     code    TEXT PRIMARY KEY,
     start   TEXT NOT NULL,          -- 已查詢過事件的期間（含頭尾）
     end     TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS scan_runs (      -- 實際推播的盤中掃描，每次一筆（D45）
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    date                TEXT    NOT NULL,   -- 交易日
+    scanned_at          TEXT    NOT NULL,   -- 掃描開始的時間（本機），YYYY-MM-DDTHH:MM:SS
+    rules_fingerprint   TEXT    NOT NULL,   -- 規則檔解析後內容的雜湊
+    observed            INTEGER NOT NULL,
+    evaluated           INTEGER NOT NULL,
+    not_evaluated       INTEGER NOT NULL,
+    substituted         INTEGER NOT NULL,   -- 現價為替代值的檔數
+    prev_close_mismatch INTEGER NOT NULL,
+    raw_file            TEXT                -- MIS 原始資料的壓縮檔（D46）
+);
+CREATE TABLE IF NOT EXISTS signals (        -- 推播的訊號：一檔股票觸發的一條進場規則
+    run_id              INTEGER NOT NULL REFERENCES scan_runs (id),
+    code                TEXT    NOT NULL,
+    rule_id             TEXT    NOT NULL,
+    rule_name           TEXT    NOT NULL,
+    side                TEXT    NOT NULL,   -- long | short
+    trend               TEXT    NOT NULL,   -- bull | range | bear | unknown
+    price               REAL    NOT NULL,   -- 推播時的現價
+    price_substitute    TEXT,               -- best_bid | best_ask；NULL 為成交價
+    change_pct          REAL,               -- 漲跌幅（%），以 MIS 參考價計算
+    detail              TEXT    NOT NULL,
+    PRIMARY KEY (run_id, code, rule_id)
+);
+CREATE TABLE IF NOT EXISTS quote_snapshots (  -- 該次掃描 MIS 回傳的全部股票；原始資料另存壓縮檔（D46）
+    run_id      INTEGER NOT NULL REFERENCES scan_runs (id),
+    code        TEXT    NOT NULL,
+    date        TEXT    NOT NULL,           -- MIS 資料日期
+    open        REAL,                       -- 沒有值（MIS 的 "-"）時為 NULL
+    high        REAL,
+    low         REAL,
+    last        REAL,                       -- 成交價：z，為 "-" 時用最後一筆成交 trade.z（D47）
+    prev_close  REAL,                       -- 參考價 y（除權息日為除權息參考價）
+    volume      INTEGER,                    -- 累積成交量（張）
+    best_bid    REAL,
+    best_ask    REAL,
+    PRIMARY KEY (run_id, code)
 );
 """
 
@@ -160,6 +200,63 @@ class SqlitePriceStore:
     def get_listing(self, code: str) -> Listing | None:
         row = self._conn.execute("SELECT market, listed_on FROM listings WHERE code = ?", (code,)).fetchone()
         return Listing(code, Market(row[0]), date.fromisoformat(row[1])) if row else None
+
+    # --- 盤中掃描的紀錄 -------------------------------------------------------
+
+    def record_scan(self, run: ScanRun, signals: Sequence[SignalRecord], quotes: Sequence[Quote]) -> int:
+        with self._conn:                    # 同一個交易：任何一步失敗時整次掃描都不寫入
+            cursor = self._conn.execute(
+                "INSERT INTO scan_runs (date, scanned_at, rules_fingerprint, observed, evaluated, not_evaluated,"
+                " substituted, prev_close_mismatch, raw_file) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (run.day.isoformat(), run.scanned_at.isoformat(timespec="seconds"), run.rules_fingerprint,
+                 run.observed, run.evaluated, run.not_evaluated, run.substituted, run.prev_close_mismatch,
+                 run.raw_file),
+            )
+            run_id = cursor.lastrowid
+            self._conn.executemany(
+                "INSERT INTO signals (run_id, code, rule_id, rule_name, side, trend, price, price_substitute,"
+                " change_pct, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(run_id, s.code, s.rule_id, s.rule_name, s.side.value, s.trend.value, s.price,
+                  s.price_substitute.value if s.price_substitute else None, s.change_pct, s.detail)
+                 for s in signals],
+            )
+            self._conn.executemany(
+                "INSERT INTO quote_snapshots (run_id, code, date, open, high, low, last, prev_close, volume,"
+                " best_bid, best_ask) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(run_id, q.code, q.date.isoformat(), q.open, q.high, q.low, q.last, q.prev_close, q.volume,
+                  q.best_bid, q.best_ask) for q in quotes],
+            )
+        return run_id
+
+    def get_scan_runs(self, start: date, end: date) -> list[ScanRun]:
+        rows = self._conn.execute(
+            "SELECT id, date, scanned_at, rules_fingerprint, observed, evaluated, not_evaluated, substituted,"
+            " prev_close_mismatch, raw_file FROM scan_runs WHERE date BETWEEN ? AND ? ORDER BY date, scanned_at, id",
+            (start.isoformat(), end.isoformat()),
+        ).fetchall()
+        return [ScanRun(day=date.fromisoformat(d), scanned_at=datetime.fromisoformat(at), rules_fingerprint=fp,
+                        observed=observed, evaluated=evaluated, not_evaluated=not_evaluated, substituted=substituted,
+                        prev_close_mismatch=mismatch, raw_file=raw_file, id=run_id)
+                for run_id, d, at, fp, observed, evaluated, not_evaluated, substituted, mismatch, raw_file in rows]
+
+    def get_signal_records(self, run_id: int) -> list[SignalRecord]:
+        rows = self._conn.execute(
+            "SELECT code, rule_id, rule_name, side, trend, price, price_substitute, change_pct, detail FROM signals"
+            " WHERE run_id = ? ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        return [SignalRecord(code=code, rule_id=rule_id, rule_name=name, side=Side(side), trend=Trend(trend),
+                             price=price, price_substitute=PriceSubstitute(sub) if sub else None, change_pct=change,
+                             detail=detail)
+                for code, rule_id, name, side, trend, price, sub, change, detail in rows]
+
+    def get_snapshot(self, run_id: int) -> dict[str, Quote]:
+        rows = self._conn.execute(
+            "SELECT code, date, open, high, low, last, prev_close, volume, best_bid, best_ask FROM quote_snapshots"
+            " WHERE run_id = ? ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        return {code: Quote(code, date.fromisoformat(d), *values) for code, d, *values in rows}
 
     # --- 共用 -----------------------------------------------------------------
 

@@ -1,15 +1,17 @@
 ﻿<#
 .SYNOPSIS
-    在 Windows 工作排程器註冊盤中掃描與盤後更新（PROJECT_PLAN.md 第 14 節 M5）。
+    在 Windows 工作排程器註冊盤中掃描、盤後更新與訊號成績單（PROJECT_PLAN.md 第 14 節 M5、RESEARCH_PLAN.md 4.1）。
 
 .DESCRIPTION
-    建立兩個每週一至週五執行的工作：
+    建立兩個每週一至週五執行的工作，與一個每週六執行的研究工作：
       stock-screener-scan    盤中掃描並推播 Discord（預設 13:10）
       stock-screener-update  盤後更新日 K（預設 21:00；FinMind 約 17:30 更新），失敗時推送錯誤通知
+      stock-screener-weekly  訊號成績單：上一週推播的訊號，推播到研究頻道（預設週六 10:00，R3）
 
     - 以目前使用者身分執行，電腦須開機且已登入；執行時會出現命令列視窗。
     - 國定假日照常觸發：scan 會判定為非交易日後結束、不推播；update 查不到新資料。
-    - 錯過的 update（例：當時關機）會在下次開機後補跑；錯過的 scan 不補跑，收盤後才推播盤中結果沒有意義。
+    - 錯過的 update、weekly（例：當時關機）會在下次開機後補跑；錯過的 scan 不補跑，收盤後才推播盤中結果沒有意義。
+    - weekly 是研究功能：失敗時錯誤通知推到研究頻道，不影響每日的 scan、update（PROJECT_PLAN.md 10.4）。
     - 使用筆電電池時也會執行。
     - 重複執行本腳本會以新的設定覆蓋。
 
@@ -17,7 +19,7 @@
     powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -ScanTime 13:05 -UpdateTime 19:00
+    powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -ScanTime 13:05 -UpdateTime 19:00 -WeeklyTime 09:00
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1 -Unregister
@@ -25,13 +27,15 @@
 param(
     [string]$ScanTime = "13:10",
     [string]$UpdateTime = "21:00",
+    [string]$WeeklyTime = "10:00",
     [switch]$Unregister
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectDir = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $ProjectDir ".venv\Scripts\python.exe"
-$TaskNames = @("stock-screener-scan", "stock-screener-update")
+$TaskNames = @("stock-screener-scan", "stock-screener-update", "stock-screener-weekly")
+$Weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 
 if ($Unregister) {
     foreach ($name in $TaskNames) {
@@ -54,20 +58,25 @@ function Register-ScreenerTask {
         [string]$Command,
         [string]$Description,
         [bool]$CatchUp,
-        [timespan]$TimeLimit
+        [timespan]$TimeLimit,
+        [string[]]$Days,
+        [string]$DaysLabel
     )
     $action = New-ScheduledTaskAction -Execute $Python -Argument "-m screener $Command" -WorkingDirectory $ProjectDir
-    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday, Tuesday, Wednesday, Thursday, Friday -At $Time
+    $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Days -At $Time
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable:$CatchUp -ExecutionTimeLimit $TimeLimit `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger -Settings $settings `
         -Description $Description -Force | Out-Null
-    Write-Host "已註冊 $Name：週一至週五 $Time 執行 python -m screener $Command"
+    Write-Host "已註冊 $Name：$DaysLabel $Time 執行 python -m screener $Command"
 }
 
-Register-ScreenerTask -Name $TaskNames[0] -Time $ScanTime -Command "scan" `
+Register-ScreenerTask -Name $TaskNames[0] -Time $ScanTime -Command "scan" -Days $Weekdays -DaysLabel "週一至週五" `
     -Description "台股盤中選股：掃描觀察清單並推播 Discord" -CatchUp $false -TimeLimit (New-TimeSpan -Minutes 10)
-Register-ScreenerTask -Name $TaskNames[1] -Time $UpdateTime -Command "update" `
+Register-ScreenerTask -Name $TaskNames[1] -Time $UpdateTime -Command "update" -Days $Weekdays -DaysLabel "週一至週五" `
     -Description "台股盤中選股：盤後更新日 K，失敗時推送錯誤通知" -CatchUp $true -TimeLimit (New-TimeSpan -Hours 1)
+Register-ScreenerTask -Name $TaskNames[2] -Time $WeeklyTime -Command "signal-report" -Days @("Saturday") `
+    -DaysLabel "每週六" -Description "台股盤中選股（研究）：上一週的訊號成績單，推播到研究頻道" -CatchUp $true `
+    -TimeLimit (New-TimeSpan -Minutes 30)
 
 Write-Host "工作目錄：$ProjectDir。可在「工作排程器」程式中查看或手動執行；log 寫入 logs\。"

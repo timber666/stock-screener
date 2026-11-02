@@ -22,38 +22,39 @@ _HTTP_BAD_WEBHOOK = (401, 403, 404)
 
 
 class DiscordWebhook:
-    """session、sleep、clock 可替換，方便測試。"""
+    """session、sleep、clock 可替換，方便測試。env_name：網址在 .env 的名稱，用於錯誤提示。"""
 
     def __init__(
         self,
         settings: DiscordSettings,
         url: str,
         *,
+        env_name: str = "DISCORD_WEBHOOK_URL",
         session: requests.Session | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._url = url
+        self._env_name = env_name
         _, _, credentials = url.partition("/webhooks/")     # {id}/{token}
         self._http = HttpClient(settings, session=session, sleep=sleep, clock=clock, error=NotifyError,
                                 redact=(url, credentials))
 
     def send(self, content: str) -> None:
         body = {"content": content, "allowed_mentions": {"parse": []}}    # 不觸發 @everyone 等提及
-        self._http.post_json(self._url, body, _check_response, label="Discord webhook")
+        self._http.post_json(self._url, body, self._check_response, label="Discord webhook")
 
-
-def _check_response(response: requests.Response) -> None:
-    """成功時不回傳內容。暫時性錯誤拋出 RetryableError，其餘錯誤拋出 NotifyError。"""
-    status = response.status_code
-    if 200 <= status < 300:
-        return
-    if status == _HTTP_RATE_LIMITED:
-        raise RetryableError("被 Discord 限流（HTTP 429）", retry_after=_retry_after(response))
-    if status >= 500:
-        raise RetryableError(f"HTTP {status}")
-    hint = "，請確認 .env 的 DISCORD_WEBHOOK_URL" if status in _HTTP_BAD_WEBHOOK else ""
-    raise NotifyError(f"Discord 拒絕訊息（HTTP {status}：{_error_message(response)}）{hint}")
+    def _check_response(self, response: requests.Response) -> None:
+        """成功時不回傳內容。暫時性錯誤拋出 RetryableError，其餘錯誤拋出 NotifyError。"""
+        status = response.status_code
+        if 200 <= status < 300:
+            return
+        if status == _HTTP_RATE_LIMITED:
+            raise RetryableError("被 Discord 限流（HTTP 429）", retry_after=_retry_after(response))
+        if status >= 500:
+            raise RetryableError(f"HTTP {status}")
+        hint = f"，請確認 .env 的 {self._env_name}" if status in _HTTP_BAD_WEBHOOK else ""
+        raise NotifyError(f"Discord 拒絕訊息（HTTP {status}：{_error_message(response)}）{hint}")
 
 
 def _json(response: requests.Response) -> Any:

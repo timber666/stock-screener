@@ -11,8 +11,8 @@ from screener.data.base import DataSourceError
 from screener.data.finmind import API_URL, FinMindClient
 from screener.models import ActionKind, CorporateAction, DailyBar, DividendEvent, DividendResult
 
-SETTINGS = FinMindSettings(timeout_sec=30, retry=2, retry_backoff_sec=5, request_interval_sec=1,
-                           dividend_lookahead_days=30)
+SETTINGS = FinMindSettings(timeout_sec=30, retry=2, retry_backoff_sec=5, request_interval_sec=1)
+LOOKAHEAD_DAYS = 30                 # research.yaml 的 events.dividend_lookahead_days
 START, END = date(2026, 10, 29), date(2026, 10, 30)
 
 
@@ -34,7 +34,8 @@ def ok(*rows: dict[str, Any]) -> FakeResponse:
 def make_client(session: FakeSession, timer: FakeTime | None = None,
                 token: str | None = "test-token") -> FinMindClient:
     timer = timer or FakeTime()
-    return FinMindClient(SETTINGS, token, session=session, sleep=timer.sleep, clock=timer.clock)
+    return FinMindClient(SETTINGS, token, dividend_lookahead_days=LOOKAHEAD_DAYS, session=session,
+                         sleep=timer.sleep, clock=timer.clock)
 
 
 # --- 請求與轉換 -------------------------------------------------------------
@@ -215,7 +216,15 @@ def test_dividend_query_looks_ahead_because_api_filters_on_record_date() -> None
     params = session.calls[0]["params"]
     assert params["dataset"] == "TaiwanStockDividend"
     assert (params["start_date"], params["end_date"]) == (
-        "2024-07-01", (JUL[1] + timedelta(days=SETTINGS.dividend_lookahead_days)).isoformat())
+        "2024-07-01", (JUL[1] + timedelta(days=LOOKAHEAD_DAYS)).isoformat())
+
+
+def test_dividends_need_lookahead_days() -> None:
+    # 只有 events 會查股利，放寬天數在 research.yaml；每日的 update 建立的用戶端沒有這個設定
+    client = FinMindClient(SETTINGS, "test-token", session=FakeSession())
+
+    with pytest.raises(ValueError, match="dividend_lookahead_days"):
+        client.fetch_dividends("2884", *JUL)
 
 
 def test_cash_and_stock_dividends_on_the_same_day_form_one_event() -> None:

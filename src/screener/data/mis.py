@@ -10,6 +10,8 @@
 盤中實測（2026-11-02 13:10）：`z` 是最近一次更新的成交價，那次更新只有掛單變動、沒有成交時為 "-"
 （290 檔中 265 檔）；最後一筆成交記在 `trade`（`z` 價格、`t` 時間、`v` 張數），因此現價依序取 `z`、
 `trade.z`（D47）。`pz` 同樣為 "-"，不使用。
+
+每檔的原始資料列（約 40 個欄位，含五檔價量、漲跌停價）保留在 Quote.raw，盤中掃描推播後存檔（D46）。
 """
 
 import logging
@@ -101,6 +103,7 @@ def _parse_record(record: Mapping[str, Any]) -> Quote:
             volume=None if record["v"] in ("", _NO_VALUE) else int(record["v"]),
             best_bid=_first_level(record["b"]),
             best_ask=_first_level(record["a"]),
+            raw=dict(record),
         )
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise DataSourceError(f"MIS {code} 的報價格式不符（{exc}）：{dict(record)!r}") from exc

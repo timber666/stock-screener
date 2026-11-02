@@ -1,6 +1,6 @@
 # 台股技術面盤中選股系統：專案規劃書
 
-> 版本：v0.22（2026-11-02）｜狀態：開發中（M0–M6 完成；M4 盤中實測後修正現價來源（D47），待 2026-11-03 再確認；M7 規格已確認、實作中，見 `RESEARCH_PLAN.md` 4.1）
+> 版本：v0.23（2026-11-02）｜狀態：開發中（M0–M6 完成；M4 盤中實測後修正現價來源（D47），待 2026-11-03 再確認；M7 實作完成，待合併後的交易日驗證，見 `RESEARCH_PLAN.md` 4.1）
 >
 > 本文件是每日選股系統與共用部分的單一事實來源；研究功能（M7 起）的規劃在 `RESEARCH_PLAN.md`，兩者的邊界見 10.4。實作前請完整閱讀。標記「⚠️ 待確認」的項目是使用者尚未拍板的決定：請採用文中預設值，並保持可在設定檔調整，不要自行改變規則語意。已拍板的決定記錄在第 15 節，不需要再次詢問。
 
@@ -256,7 +256,8 @@ flowchart LR
    - 已知限制：若資料庫確實未更新，K 棒中的「昨日」會是前一個有資料的交易日，與昨日比較的判斷（突破、爆量、多排形成）會錯位。目前只警告、不中止。
 5. 合成暫定 K 棒（無成交或無報價者略過，見 8.2），接在資料庫中今天以前的日 K 之後（資料庫已有今天的日 K 時以暫定 K 棒取代）→ 建立 StockContext → 執行規則引擎。
 6. 依族群分組推送 Discord。
-7. 每個請求失敗時重試 `retry` 次；仍失敗就推送錯誤通知到 Discord，避免使用者誤以為只是沒有訊號（第 3 步的重新查詢除外）。MIS 沒有回傳任何觀察清單股票的報價，或交易日卻沒有任何一檔可評估時，同樣視為失敗。
+7. **推播成功後寫入訊號紀錄**（M7，D45、D46）：執行紀錄、推播的每個訊號、MIS 回傳的全部報價（重新查詢的以新的取代）寫入 `screener.db`（8.3），原始資料列另存 `snapshot_dir` 下的壓縮檔（檔名為掃描時間，例 `2026-11-04_131005.json.gz`）。先寫壓縮檔，再在同一個交易內寫入資料庫，任何一步失敗時資料庫不會留下不完整的紀錄。`--dry-run`、`--replay`、非交易日與推播失敗時不寫入。寫入失敗時推送錯誤通知（「已推播 Discord，但訊號紀錄寫入失敗」），結束碼 1；已推播的訊息不受影響。
+8. 每個請求失敗時重試 `retry` 次；仍失敗就推送錯誤通知到 Discord，避免使用者誤以為只是沒有訊號（第 3 步的重新查詢除外）。MIS 沒有回傳任何觀察清單股票的報價，或交易日卻沒有任何一檔可評估時，同樣視為失敗。
    - 錯誤通知的格式：「❌ 盤中選股執行失敗（2026-11-02 13:10）」、錯誤原因、log 檔路徑。資料庫不存在、`rules.yaml` 錯誤、程式例外也會通知。
    - 不通知的情況：`--dry-run`；`config/` 的設定檔本身無法載入（此時連 Discord 的設定都讀不到，結束碼 2）；推送錯誤通知本身失敗（只記錄在 log）。
 
@@ -318,8 +319,36 @@ CREATE TABLE daily_prices (
 
 - 使用**未還原**價格，與 MIS 即時報價一致。除權息、減資、面額變更會造成價格跳空，可能影響均線與轉折點，屬已知限制（實例：6669 緯穎 2026-09-02 除權 7800 → 2610，隔天因均線仍含除權前價格而觸發三線空排；回測中的處理見 D34）。
 - M6 新增除權息與公司行動兩個資料表，只存原始事件，還原價在讀取時計算（14.2）。
-- 資料存取透過介面隔離（`data/base.py` 的 `PriceStore`、`DailyPriceSource`），未來換資料庫或資料源時只改單一模組。
-- 未來可加 `signals` 表記錄每日觸發結果，供檢討與回測使用。
+- M7 新增盤中掃描的紀錄（7.2 第 7 步；`RESEARCH_PLAN.md` 4.1），只由 `scan` 寫入，研究的 `signal-report` 只讀取：
+
+  ```sql
+  CREATE TABLE scan_runs (            -- 實際推播的盤中掃描，每次一筆（D45）
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,             -- 交易日
+      scanned_at TEXT NOT NULL,       -- 掃描開始的時間（本機），即訊息標題的時間
+      rules_fingerprint TEXT NOT NULL,  -- rules.yaml 解析後內容的 sha256 前 12 碼（只改註解不會變）
+      observed INTEGER NOT NULL, evaluated INTEGER NOT NULL, not_evaluated INTEGER NOT NULL,
+      substituted INTEGER NOT NULL,   -- 現價為替代值的檔數
+      prev_close_mismatch INTEGER NOT NULL,
+      raw_file TEXT                   -- MIS 原始資料的壓縮檔（D46）
+  );
+  CREATE TABLE signals (              -- 推播的訊號：一檔股票觸發的一條進場規則
+      run_id INTEGER NOT NULL, code TEXT NOT NULL, rule_id TEXT NOT NULL, rule_name TEXT NOT NULL,
+      side TEXT NOT NULL, trend TEXT NOT NULL,
+      price REAL NOT NULL,            -- 推播時的現價
+      price_substitute TEXT,          -- best_bid | best_ask；NULL 為成交價
+      change_pct REAL, detail TEXT NOT NULL,
+      PRIMARY KEY (run_id, code, rule_id)
+  );
+  CREATE TABLE quote_snapshots (      -- 該次掃描 MIS 回傳的全部股票，欄位同 Quote（10.1）；沒有值時為 NULL
+      run_id INTEGER NOT NULL, code TEXT NOT NULL, date TEXT NOT NULL,
+      open REAL, high REAL, low REAL, last REAL, prev_close REAL, volume INTEGER, best_bid REAL, best_ask REAL,
+      PRIMARY KEY (run_id, code)
+  );
+  ```
+
+  原始資料列（每檔約 45 個欄位，含五檔價量、漲跌停價）不進資料庫，另存壓縮檔：2026-11-02 實測 290 檔約 45 KB。
+- 資料存取透過介面隔離（`data/base.py` 的 `PriceStore`、`ScanStore`、`DailyPriceSource`），未來換資料庫或資料源時只改單一模組。
 
 ---
 
@@ -403,13 +432,13 @@ exit_rules: []                 # 保留，尚未實作
 ```yaml
 db_path: data/screener.db
 log_dir: logs
+snapshot_dir: data/snapshots # 盤中掃描推播後保存的 MIS 原始資料（7.2 第 7 步，D46）
 backfill_days: 365           # 新加入的股票回補的日曆天數
 finmind:
   timeout_sec: 30
   retry: 3                   # 連線失敗、逾時、伺服器錯誤時重試
   retry_backoff_sec: 5       # 第 n 次重試前等待 n × 此秒數
   request_interval_sec: 1    # 兩次請求的最短間隔
-  dividend_lookahead_days: 30  # 股利資料的查詢迄日往後放寬的天數（14.2）
 mis:                         # timeout_sec、retry、retry_backoff_sec、request_interval_sec 同 finmind
   timeout_sec: 10
   retry: 3
@@ -423,17 +452,9 @@ discord:                     # 欄位同 finmind；被限流（HTTP 429）時改
   retry: 3
   retry_backoff_sec: 5
   request_interval_sec: 1    # 多則訊息之間的間隔
-isin:                        # 證交所 ISIN 清單（上市日／上櫃日），events 使用；欄位同 finmind
-  timeout_sec: 60            # 上市清單約 10 MB
-  retry: 3
-  retry_backoff_sec: 5
-  request_interval_sec: 1
-events:                      # events 指令（14.2）
-  refetch_days: 7            # 已查過的股票，從上次查詢的迄日往前重疊幾天再查
-  reference_tolerance_pct: 0.5  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列在 log
 ```
 
-連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（四個來源相同）；`backtest.yaml` 只有 `backtest` 指令會讀取，欄位見 14.1。
+連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有 `backtest` 指令會讀取，欄位見 14.1；`research.yaml` 只有 `events`、`signal-report` 會讀取，見 9.5。
 
 ### 9.4 `.env`（不進版控，另提供 `.env.example`）
 
@@ -442,6 +463,27 @@ FINMIND_TOKEN=
 DISCORD_WEBHOOK_URL=
 DISCORD_RESEARCH_WEBHOOK_URL=      # 研究的定期報告（M7 起，D43）
 ```
+
+### 9.5 `config/research.yaml`（研究指令專用）
+
+```yaml
+events:                         # events 指令（14.2）
+  refetch_days: 7               # 已查過的股票，從上次查詢的迄日往前重疊幾天再查
+  reference_tolerance_pct: 0.5  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列在 log
+  dividend_lookahead_days: 30   # 股利資料的查詢迄日往後放寬的天數（14.2）
+isin:                           # 證交所 ISIN 清單（上市日／上櫃日），events 使用；欄位同 settings.yaml 的 finmind
+  timeout_sec: 60               # 上市清單約 10 MB
+  retry: 3
+  retry_backoff_sec: 5
+  request_interval_sec: 1
+signal_report:                  # 訊號成績單（RESEARCH_PLAN.md 4.1）
+  horizons: [1, 5]              # 「累積」一段的持有交易日數
+  top_n: 3                      # 本週表現最好、最差各列出幾個
+  output_dir: data/research/signal_report     # 明細 CSV
+  backtest_summary: data/backtest/summary.csv # 對照「M6 驗證段」；不存在時不顯示
+```
+
+FinMind 與 Discord 的請求設定沿用 `settings.yaml`。M7 之前 `isin`、`events` 與 `finmind.dividend_lookahead_days` 放在 `settings.yaml`（D44 修正）。
 
 ---
 
@@ -478,6 +520,8 @@ class Quote:                   # 盤中即時報價（MIS 快照）；沒有值�
     volume: int | None         # 累積成交量（張）
     best_bid: float | None
     best_ask: float | None
+    raw: Mapping[str, Any] | None = field(default=None, compare=False)   # MIS 原始資料列，供存檔（D46）
+    def current_price(self) -> tuple[float | None, PriceSubstitute | None]: ...   # 成交價→買價→賣價（D28、D47）
 
 @dataclass
 class StockContext:
@@ -540,12 +584,12 @@ class ExitRule(Rule):          # 保留，目前不實作任何子類別
 
 | 項目 | 每日系統 | 研究功能 |
 |---|---|---|
-| 指令 | `update`、`scan`（排程執行）、`analyze` | `events`、`backtest`，以及 M7 起的研究指令 |
-| 程式 | `jobs/daily_update.py`、`jobs/intraday_scan.py`、`jobs/analyze.py` | `backtest/`、`research/`（M8 起）、`jobs/` 中研究指令的程式 |
-| 資料 | `data/screener.db`：觀察清單的日 K（`update` 寫入）、訊號紀錄（M7，`scan` 寫入） | 讀取 `screener.db`；除權息與公司行動由 `events` 寫入 `screener.db`；全市場資料存在 `data/market.db`，輸出在 `data/backtest/`、`data/research/` |
+| 指令 | `update`、`scan`（排程執行）、`analyze` | `events`、`backtest`、`signal-report`（M7），以及之後的研究指令 |
+| 程式 | `jobs/daily_update.py`、`jobs/intraday_scan.py`、`jobs/analyze.py` | `backtest/`、`research/`（M7 起）、`jobs/` 中研究指令的程式 |
+| 資料 | `data/screener.db`：觀察清單的日 K（`update` 寫入）、訊號紀錄（M7，`scan` 寫入，8.3）；`data/snapshots/`（MIS 原始資料，`scan` 寫入） | 讀取 `screener.db`；除權息與公司行動由 `events` 寫入 `screener.db`；全市場資料存在 `data/market.db`，輸出在 `data/backtest/`、`data/research/` |
 | 設定 | `settings.yaml`、`watchlist.yaml`、`rules.yaml` | `backtest.yaml`、`research.yaml` |
-| 套件 | pandas、requests、PyYAML、python-dotenv | 另加研究專用套件（plotly 等） |
-| 排程 | `stock-screener-scan`、`stock-screener-update` | 需要排程時（例：週報）另外註冊獨立的工作 |
+| 套件 | pandas、requests、PyYAML、python-dotenv | 另加研究專用套件（選用依賴群組 `research`：plotly） |
+| 排程 | `stock-screener-scan`、`stock-screener-update` | 獨立的工作：`stock-screener-weekly`（M7 成績單，每週六 10:00） |
 | 文件 | 本文件 | `RESEARCH_PLAN.md` |
 
 兩邊共用的模組：`models.py`、`config.py`、`http.py`、`logging_setup.py`、`formatting.py`、`data/`、`analysis/`、`rules/`、`engine.py`、`notify/`、`jobs/__init__.py`、`__main__.py`。
@@ -561,11 +605,13 @@ class ExitRule(Rule):          # 保留，目前不實作任何子類別
 7. **開發在分支或 worktree 進行。** 主資料夾的 `main` 供排程使用，不直接修改（第 14 節）。
 8. **拆分條件。** 研究程式的規模超過每日系統，或需要大型套件（例：機器學習）時，評估把研究功能拆成獨立專案。依賴單向時，拆分只需搬移研究程式與研究設定。
 
-既有不符合上述規則的地方，在 M7 開始時一併修正（D44）：
+既有不符合上述規則的地方，已在 M7 修正（D44）：
 
-- 規則 4：`settings.yaml` 的 `isin`、`events` 區塊與 `finmind.dividend_lookahead_days` 只有 `events` 使用，但每個指令都會載入驗證。
-- 規則 5：plotly 列在主要依賴，排程使用的環境也會安裝。
-- 規則 1：`__main__.py` 一開始就匯入 `jobs/corporate_events.py`（`events`）；它沒有用到研究套件，但仍應改為執行時才匯入。
+- 規則 4：`settings.yaml` 的 `isin`、`events` 區塊與 `finmind.dividend_lookahead_days` 只有 `events` 使用，但每個指令都會載入驗證。→ 移到 `research.yaml`（9.5）；`settings.yaml` 再出現這兩個區塊時載入報錯（未知的欄位）。
+- 規則 5：plotly 列在主要依賴，排程使用的環境也會安裝。→ 移到選用依賴群組 `research`。
+- 規則 1：`__main__.py` 一開始就匯入 `jobs/corporate_events.py`（`events`）。→ `events`、`backtest`、`signal-report` 都在執行該指令時才匯入。
+
+依賴方向以測試確認（`tests/test_cli.py`）：另開一個行程執行 `update`、`scan --dry-run`、`scan --replay --dry-run` 後，plotly、`screener.backtest`、`screener.research` 與研究指令的 job 都沒有被載入；`research.yaml` 不存在或寫錯時，`update`、`scan` 照常執行。
 
 ---
 
@@ -623,15 +669,15 @@ stock-screener/
 │   ├── watchlist.yaml
 │   ├── rules.yaml
 │   ├── backtest.yaml          # 訊號回測（14.1），只有 backtest 指令會讀取
-│   └── research.yaml          # 研究的設定（規劃中，RESEARCH_PLAN.md 第 5 節）
+│   └── research.yaml          # 研究的設定（9.5），只有 events、signal-report 會讀取
 ├── src/screener/
-│   ├── __main__.py            # CLI：update / events / scan / analyze / backtest
+│   ├── __main__.py            # CLI：update / scan / analyze；研究指令 events / backtest / signal-report 執行時才匯入
 │   ├── config.py
 │   ├── logging_setup.py       # 終端＋每日 log 檔
-│   ├── models.py              # Trend, Pivot, StockInfo, DailyBar, StockContext, Signal, 除權息與公司行動
+│   ├── models.py              # Trend, Pivot, StockInfo, DailyBar, StockContext, Signal, 除權息與公司行動、訊號紀錄
 │   ├── http.py                # 請求間隔、逾時與重試（FinMind、MIS、Discord 共用）
 │   ├── data/
-│   │   ├── base.py            # 資料層介面：PriceStore、EventStore、DailyPriceSource、QuoteSource、EventSource
+│   │   ├── base.py            # 資料層介面：PriceStore、EventStore、ScanStore、DailyPriceSource、QuoteSource、EventSource
 │   │   ├── db.py
 │   │   ├── finmind.py         # 日 K、除權息、減資、面額變更
 │   │   ├── isin.py            # 證交所 ISIN 清單：上市日／上櫃日
@@ -652,7 +698,7 @@ stock-screener/
 │   ├── engine.py
 │   ├── notify/
 │   │   ├── base.py            # 推播介面：Notifier
-│   │   ├── message.py         # 組成訊息、拆成多則、錯誤通知（第 11 節）
+│   │   ├── message.py         # 組成訊息、拆成多則（研究的報告共用）、錯誤通知（第 11 節）
 │   │   └── discord.py         # Discord webhook
 │   ├── formatting.py          # 顯示用的數字格式
 │   ├── backtest/              # 訊號回測（14.1）
@@ -660,15 +706,18 @@ stock-screener/
 │   │   ├── market.py          # 升降單位與漲跌停價
 │   │   ├── stats.py           # 分組統計
 │   │   └── report.py          # 終端摘要、CSV、Plotly 圖表報表
-│   ├── research/              # 研究程式（規劃中，M8 起，RESEARCH_PLAN.md 第 5 節）
+│   ├── research/              # 研究程式（M7 起，RESEARCH_PLAN.md 第 5 節）
+│   │   ├── signal_report.py   # 訊號成績單的計算：一致性、報酬、基準、除權息調整
+│   │   └── signal_report_output.py  # 成績單的 Discord 訊息與明細 CSV
 │   └── jobs/
 │       ├── daily_update.py
 │       ├── corporate_events.py  # 抓取除權息與公司行動、對照官方參考價
 │       ├── intraday_scan.py
 │       ├── backtest.py
+│       ├── signal_report.py   # 訊號成績單（研究頻道）
 │       └── analyze.py         # 工具指令：輸出轉折點與趨勢
 ├── scripts/
-│   └── register_tasks.ps1     # 在 Windows 工作排程器註冊 scan、update（第 14 節）
+│   └── register_tasks.ps1     # 在 Windows 工作排程器註冊 scan、update、weekly（第 14 節）
 ├── tests/
 │   ├── fixtures/              # 手工構造的 K 棒資料（CSV，開頭註解寫明預期結果的推導）、MIS 實際回應（JSON）
 │   ├── data/                  # 資料庫、FinMind 與 MIS（以假的 session 測試，不連網）
@@ -676,8 +725,9 @@ stock-screener/
 │   ├── notify/                # 訊息格式與 Discord（以假的 session 測試，不連網）
 │   ├── analysis/
 │   ├── backtest/
+│   ├── research/
 │   └── rules/
-├── data/                      # SQLite（screener.db；研究的 market.db 規劃中）、回測與研究輸出（不進版控）
+├── data/                      # SQLite（screener.db；研究的 market.db 規劃中）、MIS 原始快照、回測與研究輸出（不進版控）
 └── logs/                      # 不進版控
 ```
 
@@ -695,6 +745,8 @@ python -m screener analyze 2330 2454                   # 印出轉折點與趨�
 python -m screener analyze 2330 --date 2026-10-29      # 以該日日 K 當作「今日」
 python -m screener backtest                            # 訊號回測（14.1）
 python -m screener backtest --rules-file config/rules_test.yaml --rules range_breakout_volume --horizon 10
+python -m screener signal-report                       # 上一週的訊號成績單，推播到研究頻道（RESEARCH_PLAN.md 4.1）
+python -m screener signal-report --end 2026-11-13 --dry-run  # 指定期間的最後一天，只印在終端
 ```
 
 `--replay` 與 `--dry-run` 是獨立旗標。回放模式以資料庫中該日（含）以前的日 K 建立 StockContext，該日 K 棒視為「今日」（`is_tentative = false`）；不呼叫 MIS，因此不做交易日與一致性檢查。未加 `--dry-run` 時照常推播，標題標示「回放」（第 11 節）。
@@ -704,7 +756,7 @@ python -m screener backtest --rules-file config/rules_test.yaml --rules range_br
 ## 13. 開發準則
 
 - Python 3.11 以上，全面使用 type hints；資料結構使用 `dataclass`。
-- 主要套件：pandas、requests、PyYAML、python-dotenv、pytest；M6 起加上 plotly（回測報表，D36）。研究專用套件放在選用依賴群組 `research`（10.4）。新增依賴前先說明理由。
+- 主要套件：pandas、requests、PyYAML、python-dotenv、pytest；研究專用套件放在選用依賴群組 `research`（10.4），目前為 plotly（回測報表，D36）。新增依賴前先說明理由。
 - 參數一律來自設定檔，程式中不得出現魔術數字。
 - 轉折點、趨勢判斷（含破位修正）與每條規則都必須有單元測試，使用 `tests/fixtures/` 的手工 K 棒資料，不依賴網路。
 - 網路請求要有 timeout、重試與 log。
@@ -725,7 +777,7 @@ python -m screener backtest --rules-file config/rules_test.yaml --rules range_br
 | M4 | 盤中資料：MIS 抓取、暫定 K 棒、交易日與一致性檢查 | 盤中 `screener scan --dry-run` 正確輸出 | 盤中實測（2026-11-02）後修正現價來源（D47），待 2026-11-03 再確認 |
 | M5 | Discord 推播、錯誤通知、排程設定範例（以 Windows 工作排程器為主；執行時電腦須開機） | 交易日 13:10 自動收到訊息 | 完成（2026-11-02） |
 | M6 | 訊號回測：回補 2020-06 起的日 K、除權息與公司行動資料、還原價、歷史訊號的報酬統計（14.1） | `screener backtest` 輸出各規則的統計，並手算數例供使用者對照 | 完成（2026-11-01） |
-| M7–M11 | 研究功能：訊號紀錄與追蹤、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股 | 見 `RESEARCH_PLAN.md` 第 4 節 | M7 規格已確認（`RESEARCH_PLAN.md` 4.1），待實作；M8 起未規劃 |
+| M7–M11 | 研究功能：訊號紀錄與追蹤、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股 | 見 `RESEARCH_PLAN.md` 第 4 節 | M7 實作完成（2026-11-02），待合併後的交易日驗證（`RESEARCH_PLAN.md` 4.1）；M8 起未規劃 |
 | 之後 | 停損停利規則、交易回測 | 視需求另行規劃 | 未規劃 |
 
 M4、M5 目前的驗證與待實測項目：
@@ -734,12 +786,13 @@ M4、M5 目前的驗證與待實測項目：
 - 盤中實測（2026-11-02）：13:10 排程自動執行，13:10:59 推播 1 則（觸發 12 檔：多方 4、空方 8），整個流程約 1 分鐘；昨收全部一致；MIS 沒有遇到頻率限制。成交價 `z` 為 `-` 的有 265 檔，重新查詢後仍有 255 檔改用最佳買價，原因是 `z` 只代表最近一次更新有沒有成交（8.2），已改為先用最後一筆成交 `trade.z`（D47）。
 - 待確認：2026-11-03 13:10 改用 `trade.z` 後替代價的檔數大幅下降；21:00 盤後更新成功寫入當日日 K。
 
-排程（M5）：`scripts/register_tasks.ps1` 註冊兩個週一至週五的工作，時間可用參數調整：
+排程（M5、M7）：`scripts/register_tasks.ps1` 註冊兩個週一至週五的工作與一個每週的研究工作，時間可用參數調整（`-ScanTime`、`-UpdateTime`、`-WeeklyTime`）：
 
 | 工作 | 預設時間 | 指令 | 錯過時（例：關機） |
 |---|---|---|---|
 | `stock-screener-scan` | 13:10 | `python -m screener scan` | 不補跑：收盤後才推播盤中結果沒有意義 |
 | `stock-screener-update` | 21:00 | `python -m screener update` | 開機後補跑 |
+| `stock-screener-weekly` | 週六 10:00 | `python -m screener signal-report` | 開機後補跑（R3）；研究功能，失敗時錯誤通知推到研究頻道 |
 
 以目前使用者身分執行，電腦須開機且已登入；使用電池時也會執行。國定假日照常觸發，scan 判定為非交易日後結束。
 
@@ -775,7 +828,7 @@ M4、M5 目前的驗證與待實測項目：
 
   | 資料集 | 用途 | 注意事項 |
   |---|---|---|
-  | `TaiwanStockDividend` | 股利金額 | 現金股利 = `CashEarningsDistribution` + `CashStatutorySurplus`，股票股利 = `StockEarningsDistribution` + `StockStatutorySurplus`（只取盈餘那一欄會少算）。現金股利歸到 `CashExDividendTradingDate`、股票股利歸到 `StockExDividendTradingDate`，兩者可能不同天；其中一個空白時用另一個。查詢的日期過濾套在權利分派基準日（比除權息交易日晚 6～10 天），迄日要往後放寬（`finmind.dividend_lookahead_days`，30 天），再依交易日濾回。現金增資除權只記認購比率與價格，不在股利金額中 |
+  | `TaiwanStockDividend` | 股利金額 | 現金股利 = `CashEarningsDistribution` + `CashStatutorySurplus`，股票股利 = `StockEarningsDistribution` + `StockStatutorySurplus`（只取盈餘那一欄會少算）。現金股利歸到 `CashExDividendTradingDate`、股票股利歸到 `StockExDividendTradingDate`，兩者可能不同天；其中一個空白時用另一個。查詢的日期過濾套在權利分派基準日（比除權息交易日晚 6～10 天），迄日要往後放寬（`research.yaml` 的 `events.dividend_lookahead_days`，30 天），再依交易日濾回。現金增資除權只記認購比率與價格，不在股利金額中 |
   | `TaiwanStockDividendResult` | 官方除權息前後價格 | 還原時優先使用（D37）；`date` 即除權息交易日。包含現金增資除權 |
   | `TaiwanStockCapitalReductionReferencePrice` | 減資 | 逐檔查詢。因子 = `PostReductionReferencePrice` / `ClosingPriceonTheLastTradingDay` |
   | `TaiwanStockSplitPrice` | 面額變更、分割、反分割 | 不分股票，一次回傳全市場（2015 年以來 35 筆：面額變更 24、反分割 6、分割 4、未標示 1）。因子 = `after_price` / `before_price`。2021 年以來觀察清單有 4 檔：6531 愛普、6415 矽力-KY、5536 聖暉、2327 國巨 |
@@ -907,6 +960,7 @@ M4、M5 目前的驗證與待實測項目：
 
 ## 16. 變更紀錄
 
+- v0.23（2026-11-02）：M7 實作（`RESEARCH_PLAN.md` 4.1）。盤中掃描推播成功後寫入執行紀錄、訊號與報價快照，MIS 原始資料另存壓縮檔（7.2 第 7 步、8.3 新增 `scan_runs`、`signals`、`quote_snapshots`）；`settings.yaml` 新增 `snapshot_dir`（9.3）。修正 10.4 列出的三個不符合邊界的地方（D44）：研究設定移到新的 `research.yaml`（9.5）、plotly 移到選用依賴群組 `research`、研究指令執行時才匯入，並以測試確認依賴方向。新增研究指令 `signal-report` 與排程 `stock-screener-weekly`（10.4、第 12、14 節）；`.env` 的 `DISCORD_RESEARCH_WEBHOOK_URL` 開始使用（9.4）。第 13 節的套件說明同步修改。
 - v0.22（2026-11-02）：M7 規劃（`RESEARCH_PLAN.md` 4.1）。新增 D45：只記錄實際推播的盤中掃描；D46：報價快照的原始資料另存壓縮檔。第 14 節里程碑的狀態同步修改；盤中 job、資料表、設定與專案結構的章節在 M7 實作時更新。
 - v0.21（2026-11-02）：第一次盤中實測（2026-11-02 13:10）。新增 D47：現價先用 MIS 的 `z`，為 `-` 時用最後一筆成交 `trade.z`，再用買賣價（第 6 節、7.2、8.2、D28）；記錄實測結果與頻率限制（8.2）；M5 完成，M4 待 2026-11-03 再確認（第 14 節）。
 - v0.20（2026-11-02）：新增 D42：量化研究在本專案延續，規劃另立 `RESEARCH_PLAN.md`；D43：研究的定期報告推播到另一個 Discord 頻道；D44：既有不符合邊界的地方在 M7 開始時修正。新增 10.4 每日系統與研究功能的邊界，並列出既有不符合的地方；第 0 節閱讀指引、1.2、第 2 節範圍與非目標、9.4 `.env`、第 12 節專案結構、第 13 節開發準則、第 14 節里程碑（M7–M11）同步修改。

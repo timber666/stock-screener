@@ -3,7 +3,7 @@
 上市日／上櫃日取自證交所 ISIN 清單（D38），每次執行都重新取得，並順便檢查 watchlist.yaml 的 market。
 
 每檔查詢的期間從資料庫第一筆日 K 開始，只需要涵蓋有價格的日子。已查過的股票只從上次查詢的
-迄日往前重疊 refetch_days 天（settings.yaml 的 events）再查，補上較晚公告的資料；當天已查過的股票略過，
+迄日往前重疊 refetch_days 天（research.yaml 的 events）再查，補上較晚公告的資料；當天已查過的股票略過，
 因此超過請求上限中止後重新執行，不會重複查詢已完成的股票。寫入時同一筆已存在則覆寫。
 抓完後以官方的除權息參考價交叉驗證股利資料，差異大的事件寫入 log。還原時以官方的前後價格為優先（D37），
 官方有、股利資料沒有的事件（多為現金增資除權）仍會正確還原，只列入統計。
@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from typing import Protocol
 
 from screener.analysis.adjustment import reference_price, trading_day_index
-from screener.config import AppConfig, Secrets
+from screener.config import AppConfig, ResearchConfig, Secrets
 from screener.data.base import DataSourceError, EventCoverage, EventSource, EventStore, ListingSource, PriceStore
 from screener.data.db import SqlitePriceStore
 from screener.data.finmind import FinMindClient
@@ -43,13 +43,14 @@ class EventSummary:
     wrong_market: list[str] = field(default_factory=list)   # 與 watchlist.yaml 的 market 不同的代號
 
 
-def run(config: AppConfig, secrets: Secrets) -> None:
+def run(config: AppConfig, research: ResearchConfig, secrets: Secrets) -> None:
     if not secrets.finmind_token:
         logger.warning("未設定 FINMIND_TOKEN，以未登入身分查詢（請求上限較低）")
-    source = FinMindClient(config.settings.finmind, secrets.finmind_token)
-    events = config.settings.events
+    events = research.events
+    source = FinMindClient(config.settings.finmind, secrets.finmind_token,
+                           dividend_lookahead_days=events.dividend_lookahead_days)
     with SqlitePriceStore(config.settings.db_path) as store:
-        update_events(config.watchlist.stocks, source=source, listings=IsinClient(config.settings.isin),
+        update_events(config.watchlist.stocks, source=source, listings=IsinClient(research.isin),
                       store=store, today=date.today(), refetch_days=events.refetch_days)
         check_reference_prices(config.watchlist.stocks, store=store, tolerance_pct=events.reference_tolerance_pct)
 

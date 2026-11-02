@@ -129,6 +129,16 @@ def test_records_for_codes_not_requested_are_ignored() -> None:
     assert set(quotes) == {"2330"}
 
 
+def test_raw_record_is_kept_for_archiving() -> None:
+    # 盤中掃描推播後把原始資料列存檔（D46）：五檔價量、漲跌停價等未解析的欄位都保留
+    (raw,) = [r for r in INTRADAY_BODY["msgArray"] if r["c"] == "2330"]
+
+    quote = make_client(FakeSession(FakeResponse(200, INTRADAY_BODY))).fetch_quotes([stock("2330")])["2330"]
+
+    assert quote.raw == raw and quote.raw["f"] == "425_729_314_270_208_" and quote.raw["u"] == "2605.0000"
+    assert quote == replace(quote, raw=None)              # 比較報價時不看原始資料列
+
+
 # --- 錯誤與重試 -------------------------------------------------------------
 
 @pytest.mark.parametrize(

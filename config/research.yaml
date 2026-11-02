@@ -1,0 +1,16 @@
+# 研究功能的設定（RESEARCH_PLAN.md 第 5 節）。只有研究指令（events、signal-report）會讀取，
+# 寫錯時不影響每日的 update、scan（PROJECT_PLAN.md 10.4）。FinMind、Discord 的請求設定沿用 settings.yaml。
+events:                         # events 指令（除權息、減資、面額變更，PROJECT_PLAN.md 14.2）
+  refetch_days: 7               # 已查過的股票，從上次查詢的迄日往前重疊幾天再查，補上較晚公告的資料
+  reference_tolerance_pct: 0.5  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列在 log
+  dividend_lookahead_days: 30   # 股利資料以權利分派基準日篩選（比除權息交易日晚 6～10 天），查詢迄日往後放寬的天數
+isin:                           # 證交所 ISIN 清單（上市日／上櫃日），events 指令使用；欄位同 settings.yaml 的 finmind
+  timeout_sec: 60               # 上市清單約 10 MB
+  retry: 3
+  retry_backoff_sec: 5
+  request_interval_sec: 1
+signal_report:                  # 訊號成績單：python -m screener signal-report（RESEARCH_PLAN.md 4.1）
+  horizons: [1, 5]              # 「累積」一段的持有交易日數
+  top_n: 3                      # 本週表現最好、最差各列出幾個
+  output_dir: data/research/signal_report     # 明細 CSV（不進版控）
+  backtest_summary: data/backtest/summary.csv # M6 回測的統計，用來對照「M6 驗證段」；不存在時不顯示

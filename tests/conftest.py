@@ -121,14 +121,20 @@ def write_yaml(path: Path, data: Any) -> None:
 
 @pytest.fixture
 def config_dir(tmp_path: Path) -> Path:
-    """複製 repo 的設定檔到暫存目錄，並把資料庫與 log 指向暫存目錄。"""
+    """複製 repo 的設定檔到暫存目錄，並把資料庫、log 與輸出指向暫存目錄。"""
     target = tmp_path / "config"
     shutil.copytree(REPO_CONFIG_DIR, target)
     settings_path = target / "settings.yaml"
     settings = read_yaml(settings_path)
     settings["db_path"] = str(tmp_path / "data" / "screener.db")
     settings["log_dir"] = str(tmp_path / "logs")
+    settings["snapshot_dir"] = str(tmp_path / "data" / "snapshots")
     write_yaml(settings_path, settings)
+    research_path = target / "research.yaml"
+    research = read_yaml(research_path)
+    research["signal_report"]["output_dir"] = str(tmp_path / "data" / "research" / "signal_report")
+    research["signal_report"]["backtest_summary"] = str(tmp_path / "data" / "backtest" / "summary.csv")
+    write_yaml(research_path, research)
     return target
 
 
@@ -147,6 +153,7 @@ def _no_real_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(screener.__main__, "ENV_FILE", tmp_path / ".env")
     monkeypatch.delenv("FINMIND_TOKEN", raising=False)
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("DISCORD_RESEARCH_WEBHOOK_URL", raising=False)
 
 
 @pytest.fixture(autouse=True)

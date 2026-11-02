@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
-from screener.models import CorporateAction, DailyBar, DividendEvent, DividendResult, Listing, Quote, StockInfo
+from screener.models import (CorporateAction, DailyBar, DividendEvent, DividendResult, Listing, Quote, ScanRun,
+                             SignalRecord, StockInfo)
 
 
 class DataSourceError(Exception):
@@ -108,4 +109,23 @@ class EventStore(Protocol):
         ...
 
     def get_listing(self, code: str) -> Listing | None:
+        ...
+
+
+class ScanStore(Protocol):
+    """盤中掃描的紀錄：執行紀錄、訊號與報價快照（RESEARCH_PLAN.md 4.1）。由 scan 寫入，研究只讀取。"""
+
+    def record_scan(self, run: ScanRun, signals: Sequence[SignalRecord], quotes: Sequence[Quote]) -> int:
+        """在同一個交易內寫入一次掃描的全部紀錄，回傳執行紀錄的 id。"""
+        ...
+
+    def get_scan_runs(self, start: date, end: date) -> list[ScanRun]:
+        """資料日期在 start～end（含）的執行紀錄，依日期、掃描時間排列。"""
+        ...
+
+    def get_signal_records(self, run_id: int) -> list[SignalRecord]:
+        ...
+
+    def get_snapshot(self, run_id: int) -> dict[str, Quote]:
+        """該次掃描的報價快照，key 為代號；不含原始資料列（另存壓縮檔）。"""
         ...

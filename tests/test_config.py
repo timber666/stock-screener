@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 
 from conftest import REPO_CONFIG_DIR, read_yaml, write_yaml
-from screener.config import ConfigError, load_config, load_secrets
+from screener.config import (ConfigError, load_config, load_research_config, load_rules, load_secrets,
+                             rules_fingerprint)
 from screener.models import Market
 
 BASE_WATCHLIST: dict[str, Any] = {
@@ -42,8 +43,7 @@ def test_repo_config_loads() -> None:
     assert config.settings.mis.batch_size == 50
     assert config.settings.mis.missing_price_retry == 1
     assert config.settings.finmind.timeout_sec == 30.0
-    assert config.settings.finmind.dividend_lookahead_days == 30
-    assert (config.settings.events.refetch_days, config.settings.events.reference_tolerance_pct) == (7, 0.5)
+    assert config.settings.snapshot_dir == Path("data/snapshots")
     assert config.rules.trend.pivot_ma == 5
     assert [r.id for r in config.rules.entry_rules] == [
         "bull_ma5_breakout",
@@ -193,27 +193,12 @@ def test_invalid_mis_setting_is_rejected(config_dir: Path, key: str, value: Any,
         load_config(config_dir)
 
 
-@pytest.mark.parametrize(
-    ("section", "key", "value", "message"),
-    [
-        ("finmind", "dividend_lookahead_days", -1, "finmind > dividend_lookahead_days：不可為負數"),
-        ("finmind", "dividend_lookahead_days", 1.5, "finmind > dividend_lookahead_days：應為整數"),
-        ("events", "refetch_days", -1, "events > refetch_days：不可為負數"),
-        ("events", "reference_tolerance_pct", 0, "events > reference_tolerance_pct：必須大於 0"),
-    ],
-)
-def test_invalid_events_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
-                                            message: str) -> None:
-    edit_yaml(config_dir / "settings.yaml", lambda d: d[section].update({key: value}))
+@pytest.mark.parametrize("section", ["isin", "events"])
+def test_research_settings_are_not_accepted_in_settings_yaml(config_dir: Path, section: str) -> None:
+    # 研究的設定只放 research.yaml（PROJECT_PLAN.md 10.4 規則 4）：settings.yaml 每個指令都會載入
+    edit_yaml(config_dir / "settings.yaml", lambda d: d.update({section: {}}))
 
-    with pytest.raises(ConfigError, match=message):
-        load_config(config_dir)
-
-
-def test_missing_events_section_is_rejected(config_dir: Path) -> None:
-    edit_yaml(config_dir / "settings.yaml", lambda d: d.pop("events"))
-
-    with pytest.raises(ConfigError, match="缺少必要欄位 `events`"):
+    with pytest.raises(ConfigError, match=f"未知的欄位 `{section}`"):
         load_config(config_dir)
 
 
@@ -229,7 +214,67 @@ def test_missing_config_file_is_rejected(tmp_path: Path) -> None:
         load_config(tmp_path)
 
 
+# --- research.yaml ----------------------------------------------------------
+
+def test_repo_research_config_loads() -> None:
+    research = load_research_config(REPO_CONFIG_DIR / "research.yaml")
+
+    events = research.events
+    assert (events.refetch_days, events.reference_tolerance_pct, events.dividend_lookahead_days) == (7, 0.5, 30)
+    assert research.isin.timeout_sec == 60.0
+    assert research.signal_report.horizons == (1, 5)
+    assert research.signal_report.top_n == 3
+    assert research.signal_report.output_dir == Path("data/research/signal_report")
+    assert research.signal_report.backtest_summary == Path("data/backtest/summary.csv")
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value", "message"),
+    [
+        ("events", "dividend_lookahead_days", -1, "events > dividend_lookahead_days：不可為負數"),
+        ("events", "dividend_lookahead_days", 1.5, "events > dividend_lookahead_days：應為整數"),
+        ("events", "refetch_days", -1, "events > refetch_days：不可為負數"),
+        ("events", "reference_tolerance_pct", 0, "events > reference_tolerance_pct：必須大於 0"),
+        ("isin", "retry", -1, "isin > retry：不可為負數"),
+        ("signal_report", "horizons", [5, 1], "signal_report > horizons：應由小到大且不重複"),
+        ("signal_report", "horizons", [], "signal_report > horizons：應為正整數陣列"),
+        ("signal_report", "top_n", -1, "signal_report > top_n：不可為負數"),
+    ],
+)
+def test_invalid_research_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
+                                              message: str) -> None:
+    edit_yaml(config_dir / "research.yaml", lambda d: d[section].update({key: value}))
+
+    with pytest.raises(ConfigError, match=message):
+        load_research_config(config_dir / "research.yaml")
+
+
+def test_missing_research_section_is_rejected(config_dir: Path) -> None:
+    edit_yaml(config_dir / "research.yaml", lambda d: d.pop("signal_report"))
+
+    with pytest.raises(ConfigError, match="缺少必要欄位 `signal_report`"):
+        load_research_config(config_dir / "research.yaml")
+
+
+def test_broken_research_config_does_not_affect_daily_config(config_dir: Path) -> None:
+    (config_dir / "research.yaml").write_text("events: [", encoding="utf-8")
+
+    assert load_config(config_dir).watchlist.stocks
+
+
 # --- rules.yaml -------------------------------------------------------------
+
+def test_rules_fingerprint_ignores_comments_but_not_values(config_dir: Path) -> None:
+    path = config_dir / "rules.yaml"
+    original = rules_fingerprint(load_rules(path))
+
+    path.write_text("# 只改註解\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
+    assert rules_fingerprint(load_rules(path)) == original
+
+    edit_yaml(path, lambda d: d["entry_rules"][1]["params"].update(volume_ratio=1.5))
+    changed = rules_fingerprint(load_rules(path))
+    assert changed != original and len(changed) == 12
+
 
 def test_duplicate_rule_id_is_rejected(config_dir: Path) -> None:
     edit_yaml(
@@ -254,17 +299,20 @@ def test_rule_without_params_is_rejected(config_dir: Path) -> None:
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FINMIND_TOKEN", raising=False)
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("DISCORD_RESEARCH_WEBHOOK_URL", raising=False)
 
 
 @pytest.mark.usefixtures("clean_env")
 def test_secrets_are_read_from_env_file(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("FINMIND_TOKEN=token-from-file\nDISCORD_WEBHOOK_URL=\n", encoding="utf-8")
+    env_file.write_text("FINMIND_TOKEN=token-from-file\nDISCORD_WEBHOOK_URL=\n"
+                        "DISCORD_RESEARCH_WEBHOOK_URL=https://discord.com/api/webhooks/9/research\n", encoding="utf-8")
 
     secrets = load_secrets(env_file)
 
     assert secrets.finmind_token == "token-from-file"
     assert secrets.discord_webhook_url is None
+    assert secrets.discord_research_webhook_url == "https://discord.com/api/webhooks/9/research"
 
 
 @pytest.mark.usefixtures("clean_env")
@@ -282,3 +330,4 @@ def test_missing_env_file_gives_empty_secrets(tmp_path: Path) -> None:
 
     assert secrets.finmind_token is None
     assert secrets.discord_webhook_url is None
+    assert secrets.discord_research_webhook_url is None

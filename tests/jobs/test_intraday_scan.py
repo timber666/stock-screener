@@ -1,6 +1,8 @@
 """盤中掃描（PROJECT_PLAN.md 7.2、8.2）與回放模式（第 12 節）的完整流程。"""
 
+import gzip
 import io
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import replace
@@ -11,14 +13,14 @@ import pandas as pd
 import pytest
 
 from conftest import REPO_CONFIG_DIR, make_bars
-from screener.config import load_config
+from screener.config import load_config, rules_fingerprint
 from screener.data.base import DataSourceError
 from screener.data.db import SqlitePriceStore
 from screener.engine import Engine
 from screener.jobs import JobFailed
 from screener.jobs import intraday_scan as intraday_scan_module
 from screener.jobs.intraday_scan import intraday_scan, replay_scan, run
-from screener.models import DailyBar, Market, PriceSubstitute, Quote, Side, StockInfo
+from screener.models import DailyBar, Market, PriceSubstitute, Quote, ScanRun, Side, SignalRecord, StockInfo, Trend
 from screener.notify.base import NotifyError
 
 CONFIG = load_config(REPO_CONFIG_DIR)
@@ -91,10 +93,15 @@ class FakeNotifier:
         self.sent.append(content)
 
 
+def settings_in(tmp_path: Path):
+    """資料庫與快照都指向暫存目錄。"""
+    return replace(CONFIG.settings, db_path=tmp_path / "screener.db", snapshot_dir=tmp_path / "snapshots")
+
+
 @pytest.fixture
 def replay_config(store: SqlitePriceStore, tmp_path: Path):
     watchlist = replace(CONFIG.watchlist, stocks=(stock("1111"), stock("2222"), stock("4444")))
-    return replace(CONFIG, watchlist=watchlist, settings=replace(CONFIG.settings, db_path=tmp_path / "screener.db"))
+    return replace(CONFIG, watchlist=watchlist, settings=settings_in(tmp_path))
 
 
 def test_dry_run_prints_report(replay_config) -> None:
@@ -333,11 +340,15 @@ def test_scan_fails_when_nothing_can_be_evaluated(history_store: SqlitePriceStor
 
 @pytest.fixture
 def intraday_config(history_store: SqlitePriceStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """回傳一個函式：以指定的報價取代 MIS，並把觀察清單縮小為 1111、2222。"""
-    def configure(*quotes: Quote):
-        monkeypatch.setattr(intraday_scan_module, "MisClient", lambda settings: FakeQuotes(list(quotes)))
+    """回傳一個函式：以指定的報價取代 MIS，並把觀察清單縮小為 1111、2222。
+
+    傳入 Quote 時為只查詢一次的報價；傳入多個 list 時依序為每一輪（重新查詢成交價）的報價。
+    """
+    def configure(*quotes: Quote | list[Quote]):
+        rounds = list(quotes) if quotes and isinstance(quotes[0], list) else [list(quotes)]
+        monkeypatch.setattr(intraday_scan_module, "MisClient", lambda settings: FakeQuotes(*rounds))
         watchlist = replace(CONFIG.watchlist, stocks=(stock("1111"), stock("2222")))
-        return replace(CONFIG, watchlist=watchlist, settings=replace(CONFIG.settings, db_path=tmp_path / "screener.db"))
+        return replace(CONFIG, watchlist=watchlist, settings=settings_in(tmp_path))
     return configure
 
 
@@ -368,3 +379,100 @@ def test_run_prints_nothing_on_non_trading_day(intraday_config) -> None:
     run(config, replay=None, notifier=None, out=out, now=NOW)
 
     assert out.getvalue() == ""
+
+
+# --- 推播後寫入訊號紀錄（D45、D46）-------------------------------------------
+
+def with_raw(quote: Quote, z: str) -> Quote:
+    """附上 MIS 原始資料列（只放幾個欄位，供確認存檔內容）。"""
+    return replace(quote, raw={"c": quote.code, "z": z, "f": "425_729_314_270_208_"})
+
+
+def recorded(tmp_path: Path):
+    """回傳（執行紀錄、訊號、快照）；沒有紀錄時為 None。"""
+    with SqlitePriceStore(tmp_path / "screener.db") as store:
+        runs = store.get_scan_runs(date(2000, 1, 1), date(2100, 1, 1))
+        if not runs:
+            return None
+        (scan,) = runs
+        return scan, store.get_signal_records(scan.id), store.get_snapshot(scan.id)
+
+
+def test_pushed_scan_is_recorded(intraday_config, tmp_path: Path) -> None:
+    # 1111 觸發三線多排；2222 第一次查詢沒有成交價，重新查詢後有：快照與原始資料都以重新查詢的取代
+    config = intraday_config(
+        [with_raw(quote("1111"), "110.0000"), with_raw(quote("2222", last=None), "-")],
+        [with_raw(quote("2222", last=100.0), "100.0000")],
+    )
+    notifier = FakeNotifier()
+
+    run(config, replay=None, notifier=notifier, now=NOW)
+
+    (message,) = notifier.sent
+    scan, signals, snapshot = recorded(tmp_path)
+    raw_file = tmp_path / "snapshots" / "2026-02-02_131000.json.gz"
+    assert scan == ScanRun(day=TODAY, scanned_at=NOW, rules_fingerprint=rules_fingerprint(config.rules), observed=2,
+                           evaluated=2, not_evaluated=0, substituted=0, prev_close_mismatch=0,
+                           raw_file=raw_file.as_posix(), id=scan.id)
+    assert signals == [SignalRecord("1111", "ma_bull_alignment", "三線多排", Side.LONG, Trend.RANGE, 110.0, None,
+                                    10.0, "MA5 102 > MA10 101 > MA20 100.5")]
+    assert "1111 股1111  110" in message and "三線多排" in message     # 與推播內容一致
+    assert snapshot == {"1111": quote("1111"), "2222": quote("2222", last=100.0)}
+    with gzip.open(raw_file, "rt", encoding="utf-8") as f:
+        archived = json.load(f)
+    assert archived["date"] == TODAY.isoformat() and archived["scanned_at"] == "2026-02-02T13:10:00"
+    assert [(r["c"], r["z"]) for r in archived["records"]] == [("1111", "110.0000"), ("2222", "100.0000")]
+
+
+def test_counts_of_substituted_and_not_evaluated_are_recorded(intraday_config, tmp_path: Path) -> None:
+    config = intraday_config(
+        [quote("1111", last=None), quote("2222", open=None, last=None, best_bid=None, best_ask=None)],
+        [quote("1111", last=None)],
+    )
+
+    run(config, replay=None, notifier=FakeNotifier(), now=NOW)
+
+    scan, signals, snapshot = recorded(tmp_path)
+    assert (scan.evaluated, scan.not_evaluated, scan.substituted) == (1, 1, 1)
+    assert [(s.price, s.price_substitute) for s in signals] == [(109.5, PriceSubstitute.BEST_BID)]
+    assert set(snapshot) == {"1111", "2222"}               # 未評估的股票也保存快照
+
+
+def test_dry_run_is_not_recorded(intraday_config, tmp_path: Path) -> None:
+    run(intraday_config(quote("1111"), quote("2222")), replay=None, notifier=None, out=io.StringIO(), now=NOW)
+
+    assert recorded(tmp_path) is None and not (tmp_path / "snapshots").exists()
+
+
+def test_replay_is_not_recorded(replay_config, tmp_path: Path) -> None:
+    notifier = FakeNotifier()
+
+    run(replay_config, replay=DAY, notifier=notifier)
+
+    assert notifier.sent and recorded(tmp_path) is None and not (tmp_path / "snapshots").exists()
+
+
+def test_failed_push_is_not_recorded(intraday_config, tmp_path: Path) -> None:
+    with pytest.raises(JobFailed, match="推播失敗"):
+        run(intraday_config(quote("1111"), quote("2222")), replay=None, notifier=FakeNotifier(fail=True), now=NOW)
+
+    assert recorded(tmp_path) is None
+
+
+def test_non_trading_day_is_not_recorded(intraday_config, tmp_path: Path) -> None:
+    config = intraday_config(quote("1111", day=LAST_TRADING_DAY), quote("2222", day=LAST_TRADING_DAY))
+
+    run(config, replay=None, notifier=FakeNotifier(), now=NOW)
+
+    assert recorded(tmp_path) is None
+
+
+def test_record_failure_after_push_fails_the_job(intraday_config, tmp_path: Path) -> None:
+    (tmp_path / "snapshots").write_text("不是資料夾", encoding="utf-8")       # 無法建立快照的資料夾
+    notifier = FakeNotifier()
+
+    with pytest.raises(JobFailed, match="已推播 Discord，但訊號紀錄寫入失敗"):
+        run(intraday_config(quote("1111"), quote("2222")), replay=None, notifier=notifier, now=NOW)
+
+    assert len(notifier.sent) == 1                          # 已推播的訊息不受影響
+    assert recorded(tmp_path) is None

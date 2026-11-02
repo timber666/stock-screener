@@ -37,19 +37,25 @@ _HTTP_RATE_LIMITED = 402
 
 
 class FinMindClient:
-    """依設定控制請求間隔、逾時與重試。session、sleep、clock 可替換，方便測試。"""
+    """依設定控制請求間隔、逾時與重試。session、sleep、clock 可替換，方便測試。
+
+    dividend_lookahead_days：股利資料的查詢迄日往後放寬的天數（research.yaml 的 events，只有 events 指令
+    會查股利）；未指定時不能呼叫 fetch_dividends。
+    """
 
     def __init__(
         self,
         settings: FinMindSettings,
         token: str | None,
         *,
+        dividend_lookahead_days: int | None = None,
         session: requests.Session | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._headers = {"Authorization": f"Bearer {token}"} if token else {}
-        self._dividend_lookahead = timedelta(days=settings.dividend_lookahead_days)
+        self._dividend_lookahead = (None if dividend_lookahead_days is None
+                                    else timedelta(days=dividend_lookahead_days))
         self._http = HttpClient(settings, session=session, sleep=sleep, clock=clock)
 
     def fetch_daily_prices(self, code: str, start: date, end: date) -> list[DailyBar]:
@@ -64,8 +70,10 @@ class FinMindClient:
 
         TaiwanStockDividend 的日期篩選套在權利分派基準日，比除權息交易日晚 6～10 天（Taiwan-Quant-Research
         實測）。直接用 end 查詢會漏掉「除權息日在 end 之前、基準日在之後」的事件，所以迄日往後放寬
-        dividend_lookahead_days 天（settings.yaml）再自行濾回。
+        dividend_lookahead_days 天（research.yaml）再自行濾回。
         """
+        if self._dividend_lookahead is None:
+            raise ValueError("查詢股利需要指定 dividend_lookahead_days（research.yaml 的 events）")
         rows = self._get(DIVIDEND_DATASET, code, start, end + self._dividend_lookahead)
         amounts: dict[date, list[float]] = defaultdict(lambda: [0.0, 0.0])     # 交易日 → [現金, 股票]
         for row in rows:

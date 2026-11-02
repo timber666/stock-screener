@@ -2,11 +2,16 @@
 
 所有可調整的數字都來自設定檔，程式中不提供預設值：缺少欄位、型別不符或出現
 未知欄位時一律報錯，避免打錯字造成設定被悄悄忽略。
+
+每個指令都會載入 settings.yaml、watchlist.yaml、rules.yaml；研究專用的 backtest.yaml、research.yaml
+只有研究指令會載入，寫錯時不影響每日的 update、scan（PROJECT_PLAN.md 10.4）。
 """
 
+import hashlib
+import json
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -33,7 +38,7 @@ class RequestSettings:
 
 @dataclass(frozen=True)
 class FinMindSettings(RequestSettings):
-    dividend_lookahead_days: int    # 股利資料的查詢迄日往後放寬的天數（以權利分派基準日篩選，14.2）
+    pass
 
 
 @dataclass(frozen=True)
@@ -59,18 +64,18 @@ class EventsSettings:
 
     refetch_days: int               # 已查過的股票，從上次查詢的迄日往前重疊幾天再查
     reference_tolerance_pct: float  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列出
+    dividend_lookahead_days: int    # 股利資料的查詢迄日往後放寬的天數（以權利分派基準日篩選，14.2）
 
 
 @dataclass(frozen=True)
 class Settings:
     db_path: Path
     log_dir: Path
+    snapshot_dir: Path              # 盤中掃描推播後保存的 MIS 原始資料（D46）
     backfill_days: int
     finmind: FinMindSettings
     mis: MisSettings
     discord: DiscordSettings
-    isin: IsinSettings
-    events: EventsSettings
 
 
 @dataclass(frozen=True)
@@ -129,6 +134,25 @@ class BacktestConfig:
 
 
 @dataclass(frozen=True)
+class SignalReportConfig:
+    """訊號成績單（RESEARCH_PLAN.md 4.1）。"""
+
+    horizons: tuple[int, ...]       # 「累積」一段的持有交易日數，由小到大
+    top_n: int                      # 本週最好、最差各列出幾個
+    output_dir: Path                # 明細 CSV 的輸出目錄
+    backtest_summary: Path          # M6 回測的 summary.csv；不存在時不顯示「M6 驗證段」
+
+
+@dataclass(frozen=True)
+class ResearchConfig:
+    """research.yaml：只有研究指令（events、signal-report）會載入（PROJECT_PLAN.md 10.4）。"""
+
+    events: EventsSettings
+    isin: IsinSettings
+    signal_report: SignalReportConfig
+
+
+@dataclass(frozen=True)
 class AppConfig:
     settings: Settings
     watchlist: Watchlist
@@ -139,6 +163,7 @@ class AppConfig:
 class Secrets:
     finmind_token: str | None
     discord_webhook_url: str | None
+    discord_research_webhook_url: str | None    # 研究的定期報告（D43）
 
 
 def load_config(config_dir: Path) -> AppConfig:
@@ -159,7 +184,17 @@ def load_secrets(env_file: Path) -> Secrets:
     return Secrets(
         finmind_token=lookup("FINMIND_TOKEN"),
         discord_webhook_url=lookup("DISCORD_WEBHOOK_URL"),
+        discord_research_webhook_url=lookup("DISCORD_RESEARCH_WEBHOOK_URL"),
     )
+
+
+def rules_fingerprint(rules: RulesConfig) -> str:
+    """規則檔的指紋：解析後內容的雜湊（sha256 前 12 碼）。只改註解或排版不會改變指紋。
+
+    訊號紀錄保存推播時的指紋，成績單以它判斷收盤重算時的規則是否與推播時相同（RESEARCH_PLAN.md 4.1）。
+    """
+    content = json.dumps(asdict(rules), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
 
 
 # --- settings.yaml ----------------------------------------------------------
@@ -167,16 +202,12 @@ def load_secrets(env_file: Path) -> Secrets:
 def _load_settings(path: Path) -> Settings:
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"db_path", "log_dir", "backfill_days", "finmind", "mis", "discord", "isin", "events"}, where)
+    check_keys(data, {"db_path", "log_dir", "snapshot_dir", "backfill_days", "finmind", "mis", "discord"}, where)
 
     finmind_where = f"{where} > finmind"
     finmind_data = get_field(data, "finmind", dict, where)
-    check_keys(finmind_data, _REQUEST_KEYS | {"dividend_lookahead_days"}, finmind_where)
-    finmind = FinMindSettings(
-        **_parse_request_settings(finmind_data, finmind_where),
-        dividend_lookahead_days=get_field(finmind_data, "dividend_lookahead_days", int, finmind_where),
-    )
-    require(finmind.dividend_lookahead_days >= 0, f"{finmind_where} > dividend_lookahead_days：不可為負數")
+    check_keys(finmind_data, _REQUEST_KEYS, finmind_where)
+    finmind = FinMindSettings(**_parse_request_settings(finmind_data, finmind_where))
 
     mis_where = f"{where} > mis"
     mis_data = get_field(data, "mis", dict, where)
@@ -196,30 +227,14 @@ def _load_settings(path: Path) -> Settings:
     check_keys(discord_data, _REQUEST_KEYS, discord_where)
     discord = DiscordSettings(**_parse_request_settings(discord_data, discord_where))
 
-    isin_where = f"{where} > isin"
-    isin_data = get_field(data, "isin", dict, where)
-    check_keys(isin_data, _REQUEST_KEYS, isin_where)
-    isin = IsinSettings(**_parse_request_settings(isin_data, isin_where))
-
-    events_where = f"{where} > events"
-    events_data = get_field(data, "events", dict, where)
-    check_keys(events_data, {"refetch_days", "reference_tolerance_pct"}, events_where)
-    events = EventsSettings(
-        refetch_days=get_field(events_data, "refetch_days", int, events_where),
-        reference_tolerance_pct=get_field(events_data, "reference_tolerance_pct", float, events_where),
-    )
-    require(events.refetch_days >= 0, f"{events_where} > refetch_days：不可為負數")
-    require(events.reference_tolerance_pct > 0, f"{events_where} > reference_tolerance_pct：必須大於 0")
-
     settings = Settings(
         db_path=Path(get_field(data, "db_path", str, where)),
         log_dir=Path(get_field(data, "log_dir", str, where)),
+        snapshot_dir=Path(get_field(data, "snapshot_dir", str, where)),
         backfill_days=get_field(data, "backfill_days", int, where),
         finmind=finmind,
         mis=mis,
         discord=discord,
-        isin=isin,
-        events=events,
     )
     require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
     return settings
@@ -302,10 +317,7 @@ def load_backtest_config(path: Path) -> BacktestConfig:
     check_keys(data, {"signal_start", "validation_start", "horizons", "summary_horizon", "dedupe_days",
                       "gap_flag_pct", "cost", "output_dir"}, where)
 
-    horizons = get_field(data, "horizons", list, where)
-    require(bool(horizons) and all(isinstance(h, int) and not isinstance(h, bool) and h > 0 for h in horizons),
-            f"{where} > horizons：應為正整數陣列")
-    require(horizons == sorted(set(horizons)), f"{where} > horizons：應由小到大且不重複")
+    horizons = _parse_horizons(data, where)
 
     cost_where = f"{where} > cost"
     cost_data = get_field(data, "cost", dict, where)
@@ -334,6 +346,53 @@ def load_backtest_config(path: Path) -> BacktestConfig:
     require(config.dedupe_days >= 0, f"{where} > dedupe_days：不可為負數")
     require(config.gap_flag_pct > 0, f"{where} > gap_flag_pct：必須大於 0")
     return config
+
+
+def _parse_horizons(data: Mapping[str, Any], where: str) -> list[int]:
+    """持有交易日數：由小到大、不重複的正整數陣列。"""
+    horizons = get_field(data, "horizons", list, where)
+    require(bool(horizons) and all(isinstance(h, int) and not isinstance(h, bool) and h > 0 for h in horizons),
+            f"{where} > horizons：應為正整數陣列")
+    require(horizons == sorted(set(horizons)), f"{where} > horizons：應由小到大且不重複")
+    return horizons
+
+
+# --- research.yaml ----------------------------------------------------------
+
+def load_research_config(path: Path) -> ResearchConfig:
+    """只有研究指令（events、signal-report）會載入，寫錯時不影響每日的掃描與更新（PROJECT_PLAN.md 10.4）。"""
+    data = _read_yaml(path)
+    where = path.name
+    check_keys(data, {"events", "isin", "signal_report"}, where)
+
+    events_where = f"{where} > events"
+    events_data = get_field(data, "events", dict, where)
+    check_keys(events_data, {"refetch_days", "reference_tolerance_pct", "dividend_lookahead_days"}, events_where)
+    events = EventsSettings(
+        refetch_days=get_field(events_data, "refetch_days", int, events_where),
+        reference_tolerance_pct=get_field(events_data, "reference_tolerance_pct", float, events_where),
+        dividend_lookahead_days=get_field(events_data, "dividend_lookahead_days", int, events_where),
+    )
+    require(events.refetch_days >= 0, f"{events_where} > refetch_days：不可為負數")
+    require(events.reference_tolerance_pct > 0, f"{events_where} > reference_tolerance_pct：必須大於 0")
+    require(events.dividend_lookahead_days >= 0, f"{events_where} > dividend_lookahead_days：不可為負數")
+
+    isin_where = f"{where} > isin"
+    isin_data = get_field(data, "isin", dict, where)
+    check_keys(isin_data, _REQUEST_KEYS, isin_where)
+    isin = IsinSettings(**_parse_request_settings(isin_data, isin_where))
+
+    report_where = f"{where} > signal_report"
+    report_data = get_field(data, "signal_report", dict, where)
+    check_keys(report_data, {"horizons", "top_n", "output_dir", "backtest_summary"}, report_where)
+    signal_report = SignalReportConfig(
+        horizons=tuple(_parse_horizons(report_data, report_where)),
+        top_n=get_field(report_data, "top_n", int, report_where),
+        output_dir=Path(get_field(report_data, "output_dir", str, report_where)),
+        backtest_summary=Path(get_field(report_data, "backtest_summary", str, report_where)),
+    )
+    require(signal_report.top_n >= 0, f"{report_where} > top_n：不可為負數")
+    return ResearchConfig(events=events, isin=isin, signal_report=signal_report)
 
 
 # --- watchlist.yaml ---------------------------------------------------------

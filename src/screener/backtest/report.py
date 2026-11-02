@@ -11,7 +11,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from screener.backtest.stats import ALL, EXCLUDE, OBSERVE, VALIDATE, select
+from screener.backtest.stats import (ADJUSTED_PRICE, ALL, EXCLUDE, OBSERVE, RAW_PRICE, SUMMARY_COLUMNS, VALIDATE,
+                                     select)
 from screener.config import BacktestConfig
 from screener.models import Side
 
@@ -116,10 +117,6 @@ _SIGNAL_COLUMNS = {"date": "日期", "code": "代號", "name": "名稱", "group"
                    "side": "方向", "trend": "趨勢", "entry_price": "進場價（收盤）", "segment": "段",
                    "kept": "去重後計入", "limit_locked": "漲跌停鎖死", "gap_event": "跳空事件"}
 _RETURN_COLUMNS = {"ret": "報酬", "base": "基準", "excess": "超額", "mfe": "最大有利", "mae": "最大不利"}
-_SUMMARY_COLUMNS = {"price": "判斷價格", "rule_name": "規則", "side": "方向", "segment": "段", "sample": "樣本",
-                    "limit_locked": "漲跌停鎖死", "gap_event": "跳空事件", "horizon": "持有天數", "count": "次數",
-                    "win_rate": "勝率(%)", "mean": "平均報酬(%)", "median": "中位數(%)",
-                    "excess": "平均超額報酬(%)", "net": "扣成本後平均(%)"}
 
 
 def write_csv(result: "BacktestResult", backtest: BacktestConfig, output_dir: Path) -> None:
@@ -128,10 +125,10 @@ def write_csv(result: "BacktestResult", backtest: BacktestConfig, output_dir: Pa
     for name, signals in (("signals.csv", result.signals), ("signals_adjusted.csv", result.adjusted_signals)):
         _signal_table(signals, backtest.horizons).to_csv(output_dir / name, index=False, encoding="utf-8-sig")
     summaries = []
-    for price, summary in (("未還原", result.summary), ("還原", result.adjusted_summary)):
+    for price, summary in ((RAW_PRICE, result.summary), (ADJUSTED_PRICE, result.adjusted_summary)):
         table = summary.assign(price=price, rule_name=summary["rule_id"].map(result.rule_names),
                                side=summary["rule_id"].map(result.rule_sides).map(_SIDE_LABELS))
-        summaries.append(table[list(_SUMMARY_COLUMNS)].rename(columns=_SUMMARY_COLUMNS))
+        summaries.append(table[list(SUMMARY_COLUMNS)].rename(columns=SUMMARY_COLUMNS))
     pd.concat(summaries).round(4).to_csv(output_dir / "summary.csv", index=False, encoding="utf-8-sig")
 
 

@@ -33,14 +33,47 @@ def test_help_runs_as_module() -> None:
     assert "scan" in result.stdout
 
 
-def test_daily_commands_do_not_need_plotly() -> None:
-    # 每日排程只執行 update 與 scan；plotly 只有 backtest 需要，未安裝時 CLI 仍要能啟動
+RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screener.jobs.backtest",
+                    "screener.jobs.corporate_events", "screener.jobs.signal_report")
+
+_LOADED_RESEARCH_MODULES = """
+import sys
+from screener.__main__ import main
+config_dir = sys.argv[1]
+codes = [main(["--config-dir", config_dir, *argv.split()])
+         for argv in ("update", "scan --dry-run", "scan --replay 2026-10-30 --dry-run")]
+prefixes = sys.argv[2:]
+print(codes[0], ",".join(p for p in prefixes if any(m == p or m.startswith(p + ".") for m in sys.modules)))
+"""
+
+
+def test_daily_commands_do_not_load_research_code(config_dir: Path, tmp_path: Path) -> None:
+    # 依賴只能單向（PROJECT_PLAN.md 10.4 規則 1、5）：每日排程的 update、scan 不載入研究程式與研究套件，
+    # 排程的環境沒有安裝 plotly 也能執行。觀察清單清空，讓指令跑完整個流程而不送出任何請求。
+    write_yaml(config_dir / "watchlist.yaml", {"industries": {}, "stocks": []})
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("FINMIND", "DISCORD"))}
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT / "src"), env.get("PYTHONPATH")]))
+    env["PYTHONIOENCODING"] = "utf-8"
     result = subprocess.run(
-        [sys.executable, "-c", "import sys, screener.__main__; print('plotly' in sys.modules)"],
-        cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        [sys.executable, "-c", _LOADED_RESEARCH_MODULES, str(config_dir), *RESEARCH_MODULES],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", env=env, check=True,
     )
 
-    assert result.stdout.strip() == "False"
+    assert result.stdout.split("\n")[0] == f"{EXIT_OK} "      # update 成功，且沒有載入任何研究模組
+
+
+@pytest.mark.parametrize("research_yaml", [None, "events: ["], ids=["missing", "broken"])
+def test_daily_commands_ignore_research_config(config_dir: Path, fake_finmind: type["FakeFinMindClient"],
+                                               research_yaml: str | None) -> None:
+    path = config_dir / "research.yaml"
+    if research_yaml is None:
+        path.unlink()
+    else:
+        path.write_text(research_yaml, encoding="utf-8")
+
+    assert main(["--config-dir", str(config_dir), "update"]) == EXIT_OK
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", date.today().isoformat(), "--dry-run"]) == EXIT_OK
+    assert main(["--config-dir", str(config_dir), "events"]) == EXIT_CONFIG_ERROR   # 研究指令才會載入
 
 
 def test_invalid_replay_date_is_rejected() -> None:
@@ -352,6 +385,108 @@ def test_update_without_webhook_still_runs(config_dir: Path, fake_finmind: type[
     assert main(["--config-dir", str(config_dir), "update"]) == EXIT_OK
 
     assert "未設定 DISCORD_WEBHOOK_URL（.env），失敗時不會推送錯誤通知" in read_log(config_dir)
+
+
+class TradingDayMisClient:
+    """取代 MisClient：回傳今天的報價，讓盤中掃描照常執行並推播。"""
+
+    def __init__(self, settings: Any) -> None:
+        pass
+
+    def fetch_quotes(self, stocks: Any) -> dict[str, Quote]:
+        return {stock.code: Quote(stock.code, date.today(), 10.0, 11.0, 9.0, 10.5, 10.0, 100, 10.4, 10.5)
+                for stock in stocks}
+
+
+def test_pushed_scan_is_recorded(config_dir: Path, analysis_db: str, webhook: type[FakeWebhook],
+                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(intraday_scan, "MisClient", TradingDayMisClient)
+
+    assert main(["--config-dir", str(config_dir), "scan"]) == EXIT_OK
+
+    assert webhook.sent[0].startswith("【盤中選股】")
+    with SqlitePriceStore(config_dir.parent / "data" / "screener.db") as store:
+        (run,) = store.get_scan_runs(date.today(), date.today())
+        assert len(store.get_snapshot(run.id)) == len(read_yaml(config_dir / "watchlist.yaml")["stocks"])
+    assert Path(run.raw_file).is_file() and "已寫入訊號紀錄" in read_log(config_dir)
+
+
+def test_record_failure_after_push_sends_error_notification(
+    config_dir: Path, analysis_db: str, webhook: type[FakeWebhook], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(intraday_scan, "MisClient", TradingDayMisClient)
+    blocked = config_dir.parent / "not-a-directory"
+    blocked.write_text("", encoding="utf-8")
+    settings = read_yaml(config_dir / "settings.yaml")
+    settings["snapshot_dir"] = str(blocked)
+    write_yaml(config_dir / "settings.yaml", settings)
+
+    assert main(["--config-dir", str(config_dir), "scan"]) == EXIT_FAILED
+
+    result, error = webhook.sent
+    assert result.startswith("【盤中選股】")
+    assert error.startswith("❌ 盤中選股執行失敗（") and "已推播 Discord，但訊號紀錄寫入失敗" in error
+
+
+# --- signal-report（研究頻道，D43）-------------------------------------------
+
+RESEARCH_WEBHOOK_URL = "https://discord.com/api/webhooks/456/research-token"
+
+
+class RecordingWebhook:
+    """取代 DiscordWebhook：記錄每則訊息送到哪個網址。"""
+
+    sent: list[tuple[str, str]] = []
+
+    def __init__(self, settings: Any, url: str, **kwargs: Any) -> None:
+        self.url = url
+
+    def send(self, content: str) -> None:
+        self.sent.append((self.url, content))
+
+
+@pytest.fixture
+def both_webhooks(config_dir: Path, monkeypatch: pytest.MonkeyPatch) -> type[RecordingWebhook]:
+    (config_dir.parent / ".env").write_text(
+        f"DISCORD_WEBHOOK_URL={WEBHOOK_URL}\nDISCORD_RESEARCH_WEBHOOK_URL={RESEARCH_WEBHOOK_URL}\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "DiscordWebhook", RecordingWebhook)
+    monkeypatch.setattr(RecordingWebhook, "sent", [])
+    return RecordingWebhook
+
+
+def test_signal_report_without_research_webhook_exits_with_config_error(config_dir: Path,
+                                                                        webhook: type[FakeWebhook]) -> None:
+    # 只有每日頻道的 webhook：成績單不可以推到每日頻道
+    assert main(["--config-dir", str(config_dir), "signal-report"]) == EXIT_CONFIG_ERROR
+
+    assert "未設定 DISCORD_RESEARCH_WEBHOOK_URL" in read_log(config_dir)
+    assert webhook.sent == []
+
+
+def test_signal_report_dry_run_prints_report(config_dir: Path, analysis_db: str,
+                                             capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--config-dir", str(config_dir), "signal-report", "--end", "2026-02-06", "--dry-run"]) == EXIT_OK
+
+    out = capsys.readouterr().out     # bull_zigzag 的日 K 到 02-05
+    assert out.startswith("【訊號成績單】2026-02-02 ～ 02-06（4 個交易日）\n推播 0 天：期間內沒有推播紀錄\n"
+                          "⚠️ 沒有推播紀錄的交易日：02/02、02/03、02/04、02/05\n")
+    assert (config_dir.parent / "data" / "research" / "signal_report" / "2026-02-06.csv").is_file()
+
+
+def test_signal_report_is_pushed_to_research_channel(config_dir: Path, analysis_db: str,
+                                                     both_webhooks: type[RecordingWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "signal-report", "--end", "2026-02-06"]) == EXIT_OK
+
+    assert [url for url, _ in both_webhooks.sent] == [RESEARCH_WEBHOOK_URL]
+
+
+def test_signal_report_failure_is_notified_in_research_channel(config_dir: Path,
+                                                               both_webhooks: type[RecordingWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "signal-report"]) == EXIT_FAILED      # 資料庫不存在
+
+    ((url, message),) = both_webhooks.sent
+    assert url == RESEARCH_WEBHOOK_URL
+    assert message.startswith("❌ 訊號成績單執行失敗（") and "找不到資料庫" in message
 
 
 def test_dry_run_never_uses_webhook(config_dir: Path, webhook: type[FakeWebhook]) -> None:

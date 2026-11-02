@@ -1,12 +1,12 @@
 db_path: data/screener.db
 log_dir: logs
+snapshot_dir: data/snapshots  # 盤中掃描推播後保存的 MIS 原始資料，每次一個壓縮檔（D46）
 backfill_days: 365            # 新加入觀察清單的股票回補天數（日曆天）
 finmind:
   timeout_sec: 30             # 單次請求的逾時
   retry: 3                    # 連線失敗、逾時或伺服器錯誤時的重試次數
   retry_backoff_sec: 5        # 第 n 次重試前等待 n × 此秒數
   request_interval_sec: 1     # 兩次請求的最短間隔；免費方案上限為每小時 600 次
-  dividend_lookahead_days: 30 # 股利資料以權利分派基準日篩選（比除權息交易日晚 6～10 天），查詢迄日往後放寬的天數
 mis:
   timeout_sec: 10
   retry: 3
@@ -20,11 +20,3 @@ discord:
   retry: 3                    # 連線失敗、逾時、伺服器錯誤或被限流（HTTP 429）時的重試次數
   retry_backoff_sec: 5        # 被限流時改等 Discord 指定的秒數
   request_interval_sec: 1     # 多則訊息之間的間隔
-isin:                         # 證交所 ISIN 清單（上市日／上櫃日），events 指令使用
-  timeout_sec: 60             # 上市清單約 10 MB
-  retry: 3
-  retry_backoff_sec: 5
-  request_interval_sec: 1
-events:                       # events 指令（除權息、減資、面額變更）
-  refetch_days: 7             # 已查過的股票，從上次查詢的迄日往前重疊幾天再查，補上較晚公告的資料
-  reference_tolerance_pct: 0.5  # 交叉驗證：以股利金額計算的參考價與官方差異超過此值（%）時列在 log
