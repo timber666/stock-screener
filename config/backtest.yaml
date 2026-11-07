@@ -8,6 +8,6 @@ dedupe_days: 5                  # 去重：同檔同規則距離上次計入不�
 gap_flag_pct: 3.0               # 訊號日之前的計算區間內，單次價格調整幅度達此值（%）的除權息、減資、面額變更標記為跳空事件
 cost:
   commission_pct: 0.1425        # 手續費率（%），買賣各收一次
-  commission_discount: 1.0      # 手續費折扣，例 0.28 = 2.8 折；1 = 不打折
+  commission_discount: 0.28     # 手續費折扣，例 0.28 = 2.8 折；1 = 不打折（D53）
   tax_pct: 0.3                  # 證交稅（%），賣出時收
 output_dir: data/backtest       # 輸出 signals.csv、summary.csv、report.html（不進版控）
