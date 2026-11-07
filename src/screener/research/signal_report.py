@@ -271,7 +271,7 @@ def build_report(store: Store, stocks: Sequence[StockInfo], *, engine: Engine, t
                 rows.append(_row(scan_day, code, infos, rule_id, signal.rule_name, signal.side, trend, status,
                                  in_week=True, rule_changed=rule_changed, calculator=calculator))
 
-    names = {rule.id: rule.name for rule in engine.entry_rules}
+    names = {rule.id: rule.name for rule in engine.trigger_rules}
     for row in rows:
         names.setdefault(row["rule_id"], row["rule_name"])     # 已從規則檔移除的規則排在最後
     order = {rule_id: i for i, rule_id in enumerate(names)}

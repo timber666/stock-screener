@@ -103,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 
 ### 訊號回測（`backtest`）
 
-以歷史日 K 逐日回放規則（收盤 K 棒），統計每條規則觸發後持有 1、3、5、10、20 日的報酬，並與同一天整個觀察清單的平均比較（超額報酬）。只看進場訊號、不模擬交易。定義見 [PROJECT_PLAN.md](PROJECT_PLAN.md) 14.1。
+以歷史日 K 逐日回放規則（收盤 K 棒），統計每條規則觸發後持有 1、3、5、10、20 日的報酬，並與同一天整個觀察清單的平均比較（超額報酬）。只看觸發訊號、不模擬交易。定義見 [PROJECT_PLAN.md](PROJECT_PLAN.md) 14.1。
 
 第一次使用前先準備資料；之後每天的 `update` 會自動補上新的日 K，但除權息與公司行動不會，每次回測前先執行 `events`：
 
@@ -195,19 +195,19 @@ python -m screener signal-report --dry-run
 
 ### 新增規則
 
-1. 在 `src/screener/rules/entry/` 新增模組（前置條件放 `rules/filters/`）。模組會被自動匯入，不需要修改引擎：
+1. 在 `src/screener/rules/trigger/` 新增模組（前置條件放 `rules/filters/`）。模組會被自動匯入，不需要修改引擎：
 
    ```python
    from screener.models import Side, Signal, StockContext
-   from screener.rules.base import EntryRule, register_rule
+   from screener.rules.base import TriggerRule, register_rule
    from screener.rules.conditions import is_red, is_volume_spike
 
 
    @register_rule("red_volume_spike")
-   class RedVolumeSpike(EntryRule):
+   class RedVolumeSpike(TriggerRule):
        name = "紅K爆量"
-       side = Side.LONG                                                      # 多方或空方
-       params_schema = {**EntryRule.params_schema, "volume_ratio": float}   # 參數全部必填，載入時檢查型別
+       side = Side.LONG                                                        # 多方或空方
+       params_schema = {**TriggerRule.params_schema, "volume_ratio": float}    # 參數全部必填，載入時檢查型別
 
        def evaluate(self, ctx: StockContext) -> Signal | None:
            if is_red(ctx) and is_volume_spike(ctx, self.params["volume_ratio"]):
@@ -215,7 +215,7 @@ python -m screener signal-report --dry-run
            return None
    ```
 
-2. 在 `config/rules.yaml` 的 `entry_rules` 加入設定，`trends` 為適用的趨勢（空陣列 = 不限）：
+2. 在 `config/rules.yaml` 的 `trigger_rules` 加入設定，`trends` 為適用的趨勢（空陣列 = 不限）：
 
    ```yaml
      - id: red_volume_spike

@@ -65,7 +65,7 @@ def test_summary_counts_by_rule_and_segment() -> None:
     assert (row["count"], row["win_rate"], row["mean"], row["excess"]) == pytest.approx((1, 100.0, 10.0, 5.0))
     assert row["net"] == pytest.approx(10.0 - BACKTEST.cost.round_trip_pct)
     assert select(summary, rule_id="ma_bull_alignment", segment="驗證段", horizon=1).iloc[0]["count"] == 0
-    assert list(summary["rule_id"].unique()) == [rule.id for rule in build_engine(CONFIG.rules, None).entry_rules]
+    assert list(summary["rule_id"].unique()) == [rule.id for rule in build_engine(CONFIG.rules, None).trigger_rules]
 
 
 def test_parallel_workers_give_the_same_result() -> None:
@@ -80,7 +80,7 @@ def test_only_selected_rules_are_backtested() -> None:
 
 
 def test_unknown_rule_id_is_rejected() -> None:
-    with pytest.raises(ConfigError, match="沒有已啟用的進場規則 nope"):
+    with pytest.raises(ConfigError, match="沒有已啟用的觸發規則 nope"):
         build_engine(CONFIG.rules, ["nope"])
 
 
@@ -192,7 +192,7 @@ def cli_config_dir(config_dir: Path, config) -> Path:
 
 def test_cli_backtest_with_alternative_rules_file(cli_config_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rules = read_yaml(cli_config_dir / "rules.yaml")
-    rules["entry_rules"] = [r for r in rules["entry_rules"] if r["id"] == "ma_bull_alignment"]
+    rules["trigger_rules"] = [r for r in rules["trigger_rules"] if r["id"] == "ma_bull_alignment"]
     write_yaml(cli_config_dir.parent / "experiment.yaml", rules)
 
     argv = ["--config-dir", str(cli_config_dir), "backtest", "--rules-file",

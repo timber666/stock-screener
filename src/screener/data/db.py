@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS scan_runs (      -- 實際推播的盤中掃描，每
     prev_close_mismatch INTEGER NOT NULL,
     raw_file            TEXT                -- MIS 原始資料的壓縮檔（D46）
 );
-CREATE TABLE IF NOT EXISTS signals (        -- 推播的訊號：一檔股票觸發的一條進場規則
+CREATE TABLE IF NOT EXISTS signals (        -- 推播的訊號：一檔股票觸發的一條規則
     run_id              INTEGER NOT NULL REFERENCES scan_runs (id),
     code                TEXT    NOT NULL,
     rule_id             TEXT    NOT NULL,

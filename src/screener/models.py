@@ -31,7 +31,7 @@ _TREND_LABELS = {Trend.BULL: "多頭", Trend.RANGE: "盤整", Trend.BEAR: "空�
 
 
 class Side(str, Enum):
-    """規則的方向。前置條件只管同方向的進場規則（PROJECT_PLAN.md 5.1）。"""
+    """規則的方向。前置條件只管同方向的觸發規則（PROJECT_PLAN.md 5.1）。"""
 
     LONG = "long"          # 多方
     SHORT = "short"        # 空方
@@ -167,7 +167,7 @@ class PriceSubstitute(str, Enum):
 
 @dataclass(frozen=True)
 class Signal:
-    """一條進場規則的觸發結果。"""
+    """一條觸發規則的結果。"""
 
     rule_id: str
     rule_name: str
@@ -205,7 +205,7 @@ class StockContext:
 
 @dataclass(frozen=True)
 class Hit:
-    """觸發至少一條同方向進場規則的股票。"""
+    """至少觸發一條同方向規則的股票。"""
 
     ctx: StockContext
     side: Side
@@ -247,7 +247,7 @@ class ScanRun:
 
 @dataclass(frozen=True)
 class SignalRecord:
-    """推播的一個訊號：一檔股票觸發的一條進場規則（RESEARCH_PLAN.md 4.1）。"""
+    """推播的一個訊號：一檔股票觸發的一條規則（RESEARCH_PLAN.md 4.1）。"""
 
     code: str
     rule_id: str

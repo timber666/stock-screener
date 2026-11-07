@@ -70,8 +70,8 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
 
     start = start or backtest.signal_start
     end = end or max(h.bars.index[-1] for h in histories)
-    logger.info("訊號回測 %s ~ %s：%d 檔，規則檔 %s，%d 條進場規則", start, end, len(histories), rules_label,
-                len(engine.entry_rules))
+    logger.info("訊號回測 %s ~ %s：%d 檔，規則檔 %s，%d 條觸發規則", start, end, len(histories), rules_label,
+                len(engine.trigger_rules))
     result = backtest_histories(histories, rules=rules, rule_ids=rule_ids, backtest=backtest, start=start,
                                 end=end, workers=workers)
 
@@ -97,16 +97,16 @@ def stale_events_warnings(histories: Sequence[StockHistory], coverages: Mapping[
 
 
 def build_engine(rules: RulesConfig, rule_ids: Sequence[str] | None) -> Engine:
-    """依規則檔建立引擎；指定 rule_ids 時只保留這些進場規則（D35）。"""
+    """依規則檔建立引擎；指定 rule_ids 時只保留這些觸發規則（D35）。"""
     engine = Engine.from_config(rules)
     if rule_ids is None:
         return engine
-    enabled = {rule.id for rule in engine.entry_rules}
+    enabled = {rule.id for rule in engine.trigger_rules}
     unknown = [rule_id for rule_id in rule_ids if rule_id not in enabled]
     if unknown:
-        raise ConfigError(f"--rules：規則檔中沒有已啟用的進場規則 {', '.join(unknown)}；"
+        raise ConfigError(f"--rules：規則檔中沒有已啟用的觸發規則 {', '.join(unknown)}；"
                           f"可用的有 {', '.join(sorted(enabled))}")
-    return Engine(filters=engine.filters, entry_rules=[r for r in engine.entry_rules if r.id in rule_ids])
+    return Engine(filters=engine.filters, trigger_rules=[r for r in engine.trigger_rules if r.id in rule_ids])
 
 
 def backtest_histories(histories: Sequence[StockHistory], *, rules: RulesConfig, rule_ids: Sequence[str] | None,
@@ -123,8 +123,8 @@ def backtest_histories(histories: Sequence[StockHistory], *, rules: RulesConfig,
 
     baseline = {n: pd.concat([fwd[n] for _, _, fwd in outputs], axis=1).mean(axis=1) for n in backtest.horizons}
     engine = build_engine(rules, rule_ids)
-    names = {rule.id: rule.name for rule in engine.entry_rules}
-    sides = {rule.id: rule.side.value for rule in engine.entry_rules}
+    names = {rule.id: rule.name for rule in engine.trigger_rules}
+    sides = {rule.id: rule.side.value for rule in engine.trigger_rules}
     signals = _finish([row for raw, _, _ in outputs for row in raw], baseline, backtest)
     adjusted = _finish([row for _, adj, _ in outputs for row in adj], baseline, backtest)
     cost = backtest.cost.round_trip_pct

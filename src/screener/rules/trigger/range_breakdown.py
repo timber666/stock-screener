@@ -3,15 +3,15 @@
 from screener.config import require
 from screener.formatting import format_number as num
 from screener.models import Side, Signal, StockContext
-from screener.rules.base import EntryRule, register_rule
+from screener.rules.base import TriggerRule, register_rule
 from screener.rules.conditions import body_pct, is_long_black, prior_low
 
 
 @register_rule("range_breakdown")
-class RangeBreakdown(EntryRule):
+class RangeBreakdown(TriggerRule):
     name = "盤整長黑破前低"
     side = Side.SHORT
-    params_schema = {**EntryRule.params_schema, "min_body_pct": float, "low_lookback_days": int}
+    params_schema = {**TriggerRule.params_schema, "min_body_pct": float, "low_lookback_days": int}
 
     def configure(self, where: str) -> None:
         super().configure(where)

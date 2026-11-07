@@ -8,12 +8,12 @@ from conftest import REPO_CONFIG_DIR
 from screener.config import ConfigError, RuleConfig, load_config
 from screener.models import Side
 from screener.rules import base
-from screener.rules.base import EntryRule, FilterRule, create_rules, load_builtin_rules, register_rule
+from screener.rules.base import FilterRule, TriggerRule, create_rules, load_builtin_rules, register_rule
 
 E1_PARAMS = {"trends": ["bull"], "ma": 5}
 
 
-def entry(rule_id: str, params: dict[str, Any], enabled: bool = True) -> list[RuleConfig]:
+def trigger(rule_id: str, params: dict[str, Any], enabled: bool = True) -> list[RuleConfig]:
     return [RuleConfig(id=rule_id, enabled=enabled, params=params)]
 
 
@@ -30,24 +30,24 @@ def test_repo_rules_config_builds() -> None:
     assert [(r.id, r.side) for r in create_rules(rules.filters, FilterRule, "filters")] == [
         ("above_ma20", Side.LONG), ("below_ma20", Side.SHORT),
     ]
-    assert [(r.name, r.side) for r in create_rules(rules.entry_rules, EntryRule, "entry_rules")] == [
+    assert [(r.name, r.side) for r in create_rules(rules.trigger_rules, TriggerRule, "trigger_rules")] == [
         ("多頭突破五日線紅K", Side.LONG), ("盤整長紅爆量過前高", Side.LONG), ("三線多排", Side.LONG),
         ("空頭跌破五日線黑K", Side.SHORT), ("盤整長黑破前低", Side.SHORT), ("三線空排", Side.SHORT),
     ]
 
 
 def test_disabled_rule_is_skipped_but_still_validated() -> None:
-    assert create_rules(entry("bull_ma5_breakout", E1_PARAMS, enabled=False), EntryRule, "entry_rules") == []
+    assert create_rules(trigger("bull_ma5_breakout", E1_PARAMS, enabled=False), TriggerRule, "trigger_rules") == []
 
     with pytest.raises(ConfigError, match="缺少必要欄位 `ma`"):
-        create_rules(entry("bull_ma5_breakout", {"trends": []}, enabled=False), EntryRule, "entry_rules")
+        create_rules(trigger("bull_ma5_breakout", {"trends": []}, enabled=False), TriggerRule, "trigger_rules")
 
 
 @pytest.mark.parametrize(
     ("rule_id", "params", "message"),
     [
-        ("bull_ma5_breakuot", E1_PARAMS, "entry_rules > bull_ma5_breakuot：未知的規則 id"),
-        ("above_ma20", {"ma": 20}, "above_ma20：此規則不能放在 entry_rules"),
+        ("bull_ma5_breakuot", E1_PARAMS, "trigger_rules > bull_ma5_breakuot：未知的規則 id"),
+        ("above_ma20", {"ma": 20}, "above_ma20：此規則不能放在 trigger_rules"),
         ("bull_ma5_breakout", {"trends": ["bull"]}, "缺少必要欄位 `ma`"),
         ("bull_ma5_breakout", {**E1_PARAMS, "mas": 5}, "未知的欄位 `mas`"),
         ("bull_ma5_breakout", {**E1_PARAMS, "ma": "5"}, "ma：應為整數"),
@@ -63,7 +63,7 @@ def test_disabled_rule_is_skipped_but_still_validated() -> None:
 )
 def test_invalid_rule_config_is_rejected(rule_id: str, params: dict[str, Any], message: str) -> None:
     with pytest.raises(ConfigError, match=message):
-        create_rules(entry(rule_id, params), EntryRule, "entry_rules")
+        create_rules(trigger(rule_id, params), TriggerRule, "trigger_rules")
 
 
 def test_duplicate_registration_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,7 +84,7 @@ def test_duplicate_registration_is_rejected(monkeypatch: pytest.MonkeyPatch) -> 
 def test_rule_without_side_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(base, "_REGISTRY", {})
 
-    class NoSide(EntryRule):
+    class NoSide(TriggerRule):
         name = "沒有方向"
 
         def evaluate(self, ctx):

@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     backtest_parser.add_argument("--rules-file", type=Path, metavar="PATH",
                                  help="改用另一份規則檔回測，不影響每日推播（預設為 config/rules.yaml）")
     backtest_parser.add_argument("--rules", type=_parse_ids, metavar="ID,ID",
-                                 help="只回測指定的進場規則 id，以逗號分隔")
+                                 help="只回測指定的觸發規則 id，以逗號分隔")
 
     report_parser = commands.add_parser(
         "signal-report",

@@ -1,6 +1,6 @@
 """規則介面與註冊表（PROJECT_PLAN.md 10.1、10.2）。
 
-新增規則：在 rules/filters、rules/entry 或 rules/exit 新增模組，繼承對應的類別並以
+新增規則：在 rules/filters、rules/trigger 或 rules/exit 新增模組，繼承對應的類別並以
 @register_rule("id") 註冊，再到 rules.yaml 加入設定。模組會被自動匯入，不需要修改引擎。
 """
 
@@ -13,7 +13,7 @@ from typing import Any, ClassVar, TypeVar
 from screener.config import RuleConfig, check_keys, get_field, require
 from screener.models import Side, Signal, StockContext, Trend
 
-_RULE_PACKAGES = ("filters", "entry", "exit")
+_RULE_PACKAGES = ("filters", "trigger", "exit")
 _REGISTRY: dict[str, type["Rule"]] = {}
 
 
@@ -33,7 +33,7 @@ class Rule(ABC):
 
 
 class FilterRule(Rule):
-    """前置條件：同方向的前置條件全部通過，才評估該方向的進場規則（5.2）。"""
+    """前置條件：同方向的前置條件全部通過，才評估該方向的觸發規則（5.2）。"""
 
     side: ClassVar[Side]
 
@@ -41,8 +41,8 @@ class FilterRule(Rule):
     def passes(self, ctx: StockContext) -> bool: ...
 
 
-class EntryRule(Rule):
-    """進場規則（5.3）。params 必須有 trends：適用的趨勢，空陣列代表不限（含資料不足，D18）。"""
+class TriggerRule(Rule):
+    """觸發規則（5.3）。params 必須有 trends：適用的趨勢，空陣列代表不限（含資料不足，D18）。"""
 
     side: ClassVar[Side]
     params_schema: ClassVar[Mapping[str, type]] = {"trends": list}
@@ -78,7 +78,7 @@ def register_rule(rule_id: str) -> Callable[[type[R]], type[R]]:
     def decorator(cls: type[R]) -> type[R]:
         if rule_id in _REGISTRY:
             raise ValueError(f"規則 id 重複註冊：{rule_id}")
-        if issubclass(cls, (FilterRule, EntryRule)) and not isinstance(getattr(cls, "side", None), Side):
+        if issubclass(cls, (FilterRule, TriggerRule)) and not isinstance(getattr(cls, "side", None), Side):
             raise TypeError(f"規則 {rule_id} 必須以 side 指定多方或空方")
         cls.id = rule_id
         _REGISTRY[rule_id] = cls

@@ -97,7 +97,7 @@ class RuleConfig:
 class RulesConfig:
     trend: TrendConfig
     filters: tuple[RuleConfig, ...]
-    entry_rules: tuple[RuleConfig, ...]
+    trigger_rules: tuple[RuleConfig, ...]
     exit_rules: tuple[RuleConfig, ...]
 
 
@@ -192,9 +192,12 @@ def rules_fingerprint(rules: RulesConfig) -> str:
     """規則檔的指紋：解析後內容的雜湊（sha256 前 12 碼）。只改註解或排版不會改變指紋。
 
     訊號紀錄保存推播時的指紋，成績單以它判斷收盤重算時的規則是否與推播時相同（RESEARCH_PLAN.md 4.1）。
+    雜湊的內容沿用改名前的欄位名稱 entry_rules（D49）：名稱改動不算規則變更，已記錄的推播不會被誤判。
     """
-    content = json.dumps(asdict(rules), sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    content = asdict(rules)
+    content["entry_rules"] = content.pop("trigger_rules")
+    encoded = json.dumps(content, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
 
 
 # --- settings.yaml ----------------------------------------------------------
@@ -264,7 +267,7 @@ def load_rules(path: Path) -> RulesConfig:
     """rules.yaml 格式的規則檔；回測可另外指定一份（D35）。"""
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"trend", "filters", "entry_rules", "exit_rules"}, where)
+    check_keys(data, {"trend", "filters", "trigger_rules", "exit_rules"}, where)
 
     trend_where = f"{where} > trend"
     trend_data = get_field(data, "trend", dict, where)
@@ -285,7 +288,7 @@ def load_rules(path: Path) -> RulesConfig:
     return RulesConfig(
         trend=trend,
         filters=_parse_rule_list(data, "filters", where),
-        entry_rules=_parse_rule_list(data, "entry_rules", where),
+        trigger_rules=_parse_rule_list(data, "trigger_rules", where),
         exit_rules=_parse_rule_list(data, "exit_rules", where),
     )
 

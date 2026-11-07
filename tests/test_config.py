@@ -5,8 +5,8 @@ from typing import Any
 import pytest
 
 from conftest import REPO_CONFIG_DIR, read_yaml, write_yaml
-from screener.config import (ConfigError, load_config, load_research_config, load_rules, load_secrets,
-                             rules_fingerprint)
+from screener.config import (ConfigError, RuleConfig, RulesConfig, TrendConfig, load_config, load_research_config,
+                             load_rules, load_secrets, rules_fingerprint)
 from screener.models import Market
 
 BASE_WATCHLIST: dict[str, Any] = {
@@ -45,7 +45,7 @@ def test_repo_config_loads() -> None:
     assert config.settings.finmind.timeout_sec == 30.0
     assert config.settings.snapshot_dir == Path("data/snapshots")
     assert config.rules.trend.pivot_ma == 5
-    assert [r.id for r in config.rules.entry_rules] == [
+    assert [r.id for r in config.rules.trigger_rules] == [
         "bull_ma5_breakout",
         "range_breakout_volume",
         "ma_bull_alignment",
@@ -271,15 +271,32 @@ def test_rules_fingerprint_ignores_comments_but_not_values(config_dir: Path) -> 
     path.write_text("# 只改註解\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
     assert rules_fingerprint(load_rules(path)) == original
 
-    edit_yaml(path, lambda d: d["entry_rules"][1]["params"].update(volume_ratio=1.5))
+    edit_yaml(path, lambda d: d["trigger_rules"][1]["params"].update(volume_ratio=1.5))
     changed = rules_fingerprint(load_rules(path))
     assert changed != original and len(changed) == 12
+
+
+def test_rules_fingerprint_is_unchanged_by_renaming() -> None:
+    # 已記錄的推播存的是改名前算出的指紋；entry_rules 改名為 trigger_rules（D49）不可以讓成績單誤判規則有變更。
+    # 預期值由改名前的程式算出
+    rules = RulesConfig(trend=TrendConfig(pivot_ma=5, lookback_days=120, bull_break_to_range=True,
+                                          bear_break_to_range=True),
+                        filters=(), trigger_rules=(RuleConfig(id="a", enabled=True, params={"x": 1}),), exit_rules=())
+
+    assert rules_fingerprint(rules) == "3f2828187c1e"
+
+
+def test_old_rules_key_is_rejected(config_dir: Path) -> None:
+    edit_yaml(config_dir / "rules.yaml", lambda d: d.update(entry_rules=d.pop("trigger_rules")))
+
+    with pytest.raises(ConfigError, match="未知的欄位 `entry_rules`"):
+        load_config(config_dir)
 
 
 def test_duplicate_rule_id_is_rejected(config_dir: Path) -> None:
     edit_yaml(
         config_dir / "rules.yaml",
-        lambda d: d["entry_rules"].append(copy.deepcopy(d["entry_rules"][0])),
+        lambda d: d["trigger_rules"].append(copy.deepcopy(d["trigger_rules"][0])),
     )
 
     with pytest.raises(ConfigError, match="規則 id 重複：bull_ma5_breakout"):

@@ -1,14 +1,14 @@
-"""前置條件與進場規則 E1–E5（PROJECT_PLAN.md 5.2、5.3）。"""
+"""前置條件與觸發規則 E1–E5（PROJECT_PLAN.md 5.2、5.3）。"""
 
 import pytest
 
 from conftest import make_bars, make_context, set_bar
 from screener.models import Side, Trend
-from screener.rules.entry.bear_ma5_breakdown import BearMa5Breakdown
-from screener.rules.entry.bull_ma5_breakout import BullMa5Breakout
-from screener.rules.entry.ma_alignment import MaBearAlignment, MaBullAlignment
-from screener.rules.entry.range_breakdown import RangeBreakdown
-from screener.rules.entry.range_breakout_volume import RangeBreakoutVolume
+from screener.rules.trigger.bear_ma5_breakdown import BearMa5Breakdown
+from screener.rules.trigger.bull_ma5_breakout import BullMa5Breakout
+from screener.rules.trigger.ma_alignment import MaBearAlignment, MaBullAlignment
+from screener.rules.trigger.range_breakdown import RangeBreakdown
+from screener.rules.trigger.range_breakout_volume import RangeBreakoutVolume
 from screener.rules.filters.above_ma20 import AboveMa20
 from screener.rules.filters.below_ma20 import BelowMa20
 

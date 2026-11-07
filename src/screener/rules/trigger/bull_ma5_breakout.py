@@ -3,15 +3,15 @@
 from screener.config import require
 from screener.formatting import format_number as num
 from screener.models import Side, Signal, StockContext
-from screener.rules.base import EntryRule, register_rule
+from screener.rules.base import TriggerRule, register_rule
 from screener.rules.conditions import crosses_above_ma, is_red
 
 
 @register_rule("bull_ma5_breakout")
-class BullMa5Breakout(EntryRule):
+class BullMa5Breakout(TriggerRule):
     name = "多頭突破五日線紅K"
     side = Side.LONG
-    params_schema = {**EntryRule.params_schema, "ma": int}
+    params_schema = {**TriggerRule.params_schema, "ma": int}
 
     def configure(self, where: str) -> None:
         super().configure(where)

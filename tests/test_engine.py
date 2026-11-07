@@ -1,10 +1,10 @@
-"""規則引擎的流程（PROJECT_PLAN.md 5.1）：依方向分別判斷前置條件 → 適用趨勢 → 進場規則。"""
+"""規則引擎的流程（PROJECT_PLAN.md 5.1）：依方向分別判斷前置條件 → 適用趨勢 → 觸發規則。"""
 
 from conftest import REPO_CONFIG_DIR, make_bars, make_context
 from screener.config import load_config
 from screener.engine import Engine
 from screener.models import Side, Signal, StockContext, Trend
-from screener.rules.base import EntryRule, FilterRule
+from screener.rules.base import FilterRule, TriggerRule
 
 
 class StubFilter(FilterRule):
@@ -20,11 +20,11 @@ class StubFilter(FilterRule):
         return self.result
 
 
-class StubEntry(EntryRule):
+class StubTrigger(TriggerRule):
     id = "stub_entry"
-    name = "測試進場"
+    name = "測試觸發"
 
-    def __init__(self, trends: list[str], fires: bool = True, name: str = "測試進場", side: Side = Side.LONG) -> None:
+    def __init__(self, trends: list[str], fires: bool = True, name: str = "測試觸發", side: Side = Side.LONG) -> None:
         super().__init__({"trends": trends})
         self.fires = fires
         self.label = name
@@ -41,30 +41,30 @@ CTX = make_context(make_bars([10.0, 11.0]), trend=Trend.BULL)
 
 def test_returns_signals_of_all_triggered_rules_in_order() -> None:
     engine = Engine(filters=[StubFilter(True)],
-                    entry_rules=[StubEntry([], name="甲"), StubEntry([], fires=False), StubEntry(["bull"], name="乙")])
+                    trigger_rules=[StubTrigger([], name="甲"), StubTrigger([], fires=False), StubTrigger(["bull"], name="乙")])
 
     assert [s.rule_name for s in engine.evaluate(CTX)] == ["甲", "乙"]
 
 
-def test_failed_filter_skips_entry_rules_of_the_same_side_only() -> None:
-    long_rule, short_rule = StubEntry([], name="多"), StubEntry([], name="空", side=Side.SHORT)
+def test_failed_filter_skips_trigger_rules_of_the_same_side_only() -> None:
+    long_rule, short_rule = StubTrigger([], name="多"), StubTrigger([], name="空", side=Side.SHORT)
     engine = Engine(filters=[StubFilter(True), StubFilter(False), StubFilter(True, side=Side.SHORT)],
-                    entry_rules=[long_rule, short_rule])
+                    trigger_rules=[long_rule, short_rule])
 
     assert [s.rule_name for s in engine.evaluate(CTX)] == ["空"]
     assert long_rule.calls == 0
 
 
 def test_long_signals_come_before_short_signals() -> None:
-    engine = Engine(filters=[], entry_rules=[StubEntry([], name="空", side=Side.SHORT), StubEntry([], name="多")])
+    engine = Engine(filters=[], trigger_rules=[StubTrigger([], name="空", side=Side.SHORT), StubTrigger([], name="多")])
 
     assert [(s.rule_name, s.side) for s in engine.evaluate(CTX)] == [("多", Side.LONG), ("空", Side.SHORT)]
 
 
 def test_rule_for_other_trends_is_not_evaluated() -> None:
-    rule = StubEntry(["range", "bear"])
+    rule = StubTrigger(["range", "bear"])
 
-    assert Engine(filters=[], entry_rules=[rule]).evaluate(CTX) == []
+    assert Engine(filters=[], trigger_rules=[rule]).evaluate(CTX) == []
     assert rule.calls == 0
 
 

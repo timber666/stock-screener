@@ -239,12 +239,12 @@ def test_replay_dry_run_prints_report(
 
 def test_unknown_rule_id_exits_with_config_error(config_dir: Path, analysis_db: str) -> None:
     rules = read_yaml(config_dir / "rules.yaml")
-    rules["entry_rules"][0]["id"] = "bull_ma5_breakuot"
+    rules["trigger_rules"][0]["id"] = "bull_ma5_breakuot"
     write_yaml(config_dir / "rules.yaml", rules)
 
     assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05", "--dry-run"]) == EXIT_CONFIG_ERROR
 
-    assert "設定檔錯誤：rules.yaml > entry_rules > bull_ma5_breakuot：未知的規則 id" in read_log(config_dir)
+    assert "設定檔錯誤：rules.yaml > trigger_rules > bull_ma5_breakuot：未知的規則 id" in read_log(config_dir)
 
 
 def read_log(config_dir: Path) -> str:
@@ -321,7 +321,7 @@ def test_scan_failure_sends_error_notification(config_dir: Path, webhook: type[F
 
 def test_rules_error_also_sends_error_notification(config_dir: Path, webhook: type[FakeWebhook]) -> None:
     rules = read_yaml(config_dir / "rules.yaml")
-    rules["entry_rules"][0]["id"] = "bull_ma5_breakuot"
+    rules["trigger_rules"][0]["id"] = "bull_ma5_breakuot"
     write_yaml(config_dir / "rules.yaml", rules)
 
     assert main(["--config-dir", str(config_dir), "scan"]) == EXIT_CONFIG_ERROR

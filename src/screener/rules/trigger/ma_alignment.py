@@ -6,14 +6,14 @@ from typing import ClassVar
 from screener.config import require
 from screener.formatting import format_number as num
 from screener.models import Side, Signal, StockContext
-from screener.rules.base import EntryRule, register_rule
+from screener.rules.base import TriggerRule, register_rule
 from screener.rules.conditions import is_strictly_ascending, is_strictly_descending, ma_values
 
 
-class MaAlignment(EntryRule):
+class MaAlignment(TriggerRule):
     """均線排列：今日形成指定的排列；only_on_formation 時昨日必須尚未形成。不看 K 棒顏色（D25）。"""
 
-    params_schema = {**EntryRule.params_schema, "mas": list, "only_on_formation": bool}
+    params_schema = {**TriggerRule.params_schema, "mas": list, "only_on_formation": bool}
     is_aligned: ClassVar[Callable[[Sequence[float]], bool]]
     symbol: ClassVar[str]               # 顯示用的比較符號
 

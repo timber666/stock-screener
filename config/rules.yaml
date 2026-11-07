@@ -4,7 +4,7 @@ trend:
   bull_break_to_range: true    # 多頭跌破前底 → 盤整
   bear_break_to_range: true    # 空頭突破前頭 → 盤整
 
-# 每條規則屬於多方或空方（由規則本身決定）；前置條件只管同方向的進場規則
+# 每條規則屬於多方或空方（由規則本身決定）；前置條件只管同方向的觸發規則
 filters:
   - id: above_ma20             # 多方：現價 > MA20
     enabled: true
@@ -13,7 +13,7 @@ filters:
     enabled: true
     params: { ma: 20 }
 
-entry_rules:                   # trends: bull | range | bear；空陣列 = 不限（含資料不足）
+trigger_rules:                 # trends: bull | range | bear；空陣列 = 不限（含資料不足）
   # 多方
   - id: bull_ma5_breakout
     enabled: true

@@ -89,7 +89,7 @@ def record_scan(config: AppConfig, report: ScanReport, *, scanned_at: datetime) 
 
 
 def signal_records(report: ScanReport) -> list[SignalRecord]:
-    """推播內容中的每個訊號（一檔股票觸發的一條進場規則）一筆。"""
+    """推播內容中的每個訊號（一檔股票觸發的一條規則）一筆。"""
     return [
         SignalRecord(code=hit.ctx.info.code, rule_id=signal.rule_id, rule_name=signal.rule_name, side=hit.side,
                      trend=hit.ctx.trend, price=float(hit.ctx.today["close"]), price_substitute=hit.price_substitute,
