@@ -34,7 +34,7 @@ def test_help_runs_as_module() -> None:
 
 
 RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screener.jobs.backtest",
-                    "screener.jobs.corporate_events", "screener.jobs.signal_report")
+                    "screener.jobs.trade_backtest", "screener.jobs.corporate_events", "screener.jobs.signal_report")
 
 _LOADED_RESEARCH_MODULES = """
 import sys

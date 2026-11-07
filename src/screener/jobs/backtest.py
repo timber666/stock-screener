@@ -47,7 +47,28 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
     if horizon not in backtest.horizons:
         raise ConfigError(f"--horizon {horizon}：應為 backtest.yaml 的 horizons 其中之一 {list(backtest.horizons)}")
     engine = build_engine(rules, rule_ids)       # 先檢查規則，錯誤時在讀資料前就結束
+    histories, warnings = load_histories(config)
 
+    start = start or backtest.signal_start
+    end = end or max(h.bars.index[-1] for h in histories)
+    logger.info("訊號回測 %s ~ %s：%d 檔，規則檔 %s，%d 條觸發規則", start, end, len(histories), rules_label,
+                len(engine.trigger_rules))
+    result = backtest_histories(histories, rules=rules, rule_ids=rule_ids, backtest=backtest, start=start,
+                                end=end, workers=workers)
+
+    output_dir = backtest.output_dir
+    write_csv(result, backtest, output_dir)
+    write_html(result, backtest, horizon, output_dir / "report.html")
+    (out or sys.stdout).write(format_summary(result, backtest, horizon, len(histories), rules_label,
+                                             output_dir, warnings=warnings) + "\n")
+    return result
+
+
+def load_histories(config: AppConfig) -> tuple[list[StockHistory], list[str]]:
+    """讀出觀察清單的日 K、除權息與公司行動、上市櫃日（訊號回測與交易回測共用）。
+
+    回傳 (歷史資料, 要印在終端摘要的提醒)。有日 K 卻沒查過事件的股票無法還原權息，以失敗結束。
+    """
     with open_existing_store(config.settings.db_path) as store:
         first_bars = {s.code: store.earliest_date(s.code) for s in config.watchlist.stocks}
         stocks = [s for s in config.watchlist.stocks if first_bars[s.code] is not None]
@@ -66,21 +87,7 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
         histories = [load_history(store, store, s) for s in stocks]
     if not histories:
         raise JobFailed("資料庫沒有任何日 K，請先執行 update")
-    warnings = stale_events_warnings(histories, coverages)
-
-    start = start or backtest.signal_start
-    end = end or max(h.bars.index[-1] for h in histories)
-    logger.info("訊號回測 %s ~ %s：%d 檔，規則檔 %s，%d 條觸發規則", start, end, len(histories), rules_label,
-                len(engine.trigger_rules))
-    result = backtest_histories(histories, rules=rules, rule_ids=rule_ids, backtest=backtest, start=start,
-                                end=end, workers=workers)
-
-    output_dir = backtest.output_dir
-    write_csv(result, backtest, output_dir)
-    write_html(result, backtest, horizon, output_dir / "report.html")
-    (out or sys.stdout).write(format_summary(result, backtest, horizon, len(histories), rules_label,
-                                             output_dir, warnings=warnings) + "\n")
-    return result
+    return histories, stale_events_warnings(histories, coverages)
 
 
 def stale_events_warnings(histories: Sequence[StockHistory], coverages: Mapping[str, EventCoverage]) -> list[str]:

@@ -1,6 +1,6 @@
 """CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。
 
-研究指令（events、backtest、signal-report）的程式在執行該指令時才匯入：每日排程的 update、scan
+研究指令（events、backtest、trade-backtest、signal-report）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
 """
 
@@ -90,6 +90,19 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="改用另一份規則檔回測，不影響每日推播（預設為 config/rules.yaml）")
     backtest_parser.add_argument("--rules", type=_parse_ids, metavar="ID,ID",
                                  help="只回測指定的觸發規則 id，以逗號分隔")
+
+    trade_parser = commands.add_parser(
+        "trade-backtest",
+        help="交易回測：照進出場規則模擬一個帳戶",
+        description="照 rules.yaml 的進場與出場規則模擬一個帳戶，比較檔數上限與挑選方式（設定在 config/backtest.yaml "
+                    "的 trade）。預設只跑觀察段；選定一組後加 --validate 檢查它在驗證段的結果。需先執行 update --since 與 events。",
+    )
+    trade_parser.add_argument("--validate", action="store_true",
+                              help="只跑驗證段，需同時指定 --max-positions 與 --pick（只檢查觀察段選定的一組）")
+    trade_parser.add_argument("--max-positions", type=int, metavar="N", help="驗證段使用的檔數上限")
+    trade_parser.add_argument("--pick", metavar="PICK", help="驗證段使用的挑選方式，例：nearest_ma、volume_ratio")
+    trade_parser.add_argument("--rules-file", type=Path, metavar="PATH",
+                              help="改用另一份規則檔，不影響每日推播（預設為 config/rules.yaml）")
 
     report_parser = commands.add_parser(
         "signal-report",
@@ -185,6 +198,13 @@ def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets,
 
         signal_report.run(config, load_research_config(args.config_dir / "research.yaml"), end=args.end,
                           notifier=notifier)
+    elif args.command == "trade-backtest":
+        from screener.jobs import trade_backtest    # 需要研究套件 plotly
+
+        rules_file = args.rules_file or args.config_dir / "rules.yaml"
+        trade_backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
+                           rules=load_rules(rules_file), rules_label=str(rules_file), validate=args.validate,
+                           max_positions=args.max_positions, pick=args.pick)
     else:
         from screener.jobs import backtest      # 需要研究套件 plotly
 

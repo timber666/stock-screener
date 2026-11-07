@@ -120,6 +120,23 @@ class CostConfig:
         return self.commission_pct * self.commission_discount * 2 + self.tax_pct
 
 
+TRADE_PICKS = ("nearest_ma", "volume_ratio")      # 交易回測的挑選方式；隨機一定會跑，作為基準
+
+
+@dataclass(frozen=True)
+class TradeConfig:
+    """交易回測（RESEARCH_PLAN.md 4.2）。"""
+
+    initial_capital: float          # 初始資金（元）
+    max_positions: tuple[int, ...]  # 同時最多幾檔，各跑一次
+    picks: tuple[str, ...]          # 訊號超過空位時的挑選方式（TRADE_PICKS）
+    pick_ma: int                    # nearest_ma：距離這條均線最近的優先
+    random_runs: int                # 隨機挑選跑幾次
+    random_seed: int
+    min_commission: float           # 每筆最低手續費（元）
+    output_dir: Path
+
+
 @dataclass(frozen=True)
 class BacktestConfig:
     """訊號回測（PROJECT_PLAN.md 14.1）。"""
@@ -132,6 +149,7 @@ class BacktestConfig:
     gap_flag_pct: float             # 計算區間內單次價格調整幅度達此值（%）的事件標記為跳空事件
     cost: CostConfig
     output_dir: Path
+    trade: TradeConfig
 
 
 @dataclass(frozen=True)
@@ -194,10 +212,11 @@ def rules_fingerprint(rules: RulesConfig) -> str:
 
     訊號紀錄保存推播時的指紋，成績單以它判斷收盤重算時的規則是否與推播時相同（RESEARCH_PLAN.md 4.1）。
     雜湊的內容沿用改名前的欄位名稱 entry_rules（D49）：名稱改動不算規則變更，已記錄的推播不會被誤判。
-    進場規則（5.5）只影響推播標示，不影響訊號，不列入雜湊（D54）。
+    進場規則（5.5）只影響推播標示，出場規則（5.4）只用於交易回測，兩者都不影響訊號，不列入雜湊（D54、D56）。
     """
     content = asdict(rules)
     content["entry_rules"] = content.pop("trigger_rules")      # 觸發規則覆蓋真正的進場規則，後者不列入雜湊
+    content["exit_rules"] = []                                  # 加入出場規則之前的指紋是以空陣列計算
     encoded = json.dumps(content, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
 
@@ -317,11 +336,11 @@ def _parse_rule_list(data: Mapping[str, Any], key: str, where: str) -> tuple[Rul
 # --- backtest.yaml ----------------------------------------------------------
 
 def load_backtest_config(path: Path) -> BacktestConfig:
-    """只有 backtest 指令會載入，寫錯時不影響每日的掃描與更新。"""
+    """只有 backtest、trade-backtest 指令會載入，寫錯時不影響每日的掃描與更新。"""
     data = _read_yaml(path)
     where = path.name
     check_keys(data, {"signal_start", "validation_start", "horizons", "summary_horizon", "dedupe_days",
-                      "gap_flag_pct", "cost", "output_dir"}, where)
+                      "gap_flag_pct", "cost", "output_dir", "trade"}, where)
 
     horizons = _parse_horizons(data, where)
 
@@ -346,12 +365,41 @@ def load_backtest_config(path: Path) -> BacktestConfig:
         gap_flag_pct=get_field(data, "gap_flag_pct", float, where),
         cost=cost,
         output_dir=Path(get_field(data, "output_dir", str, where)),
+        trade=_parse_trade(get_field(data, "trade", dict, where), f"{where} > trade"),
     )
     require(config.validation_start > config.signal_start, f"{where} > validation_start：應晚於 signal_start")
     require(config.summary_horizon in config.horizons, f"{where} > summary_horizon：應為 horizons 其中之一")
     require(config.dedupe_days >= 0, f"{where} > dedupe_days：不可為負數")
     require(config.gap_flag_pct > 0, f"{where} > gap_flag_pct：必須大於 0")
     return config
+
+
+def _parse_trade(data: Mapping[str, Any], where: str) -> TradeConfig:
+    check_keys(data, {"initial_capital", "max_positions", "picks", "pick_ma", "random_runs", "random_seed",
+                      "min_commission", "output_dir"}, where)
+    max_positions = get_field(data, "max_positions", list, where)
+    require(bool(max_positions) and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in max_positions),
+            f"{where} > max_positions：應為正整數陣列")
+    require(max_positions == sorted(set(max_positions)), f"{where} > max_positions：應由小到大且不重複")
+    picks = get_field(data, "picks", list, where)
+    for pick in picks:
+        require(pick in TRADE_PICKS, f"{where} > picks：應為 {'、'.join(TRADE_PICKS)} 其中之一，實際為 {pick!r}")
+    require(len(picks) == len(set(picks)), f"{where} > picks：不可重複")
+    trade = TradeConfig(
+        initial_capital=get_field(data, "initial_capital", float, where),
+        max_positions=tuple(max_positions),
+        picks=tuple(picks),
+        pick_ma=get_field(data, "pick_ma", int, where),
+        random_runs=get_field(data, "random_runs", int, where),
+        random_seed=get_field(data, "random_seed", int, where),
+        min_commission=get_field(data, "min_commission", float, where),
+        output_dir=Path(get_field(data, "output_dir", str, where)),
+    )
+    require(trade.initial_capital > 0, f"{where} > initial_capital：必須大於 0")
+    require(trade.pick_ma > 0, f"{where} > pick_ma：必須大於 0")
+    require(trade.random_runs >= 0, f"{where} > random_runs：不可為負數")
+    require(trade.min_commission >= 0, f"{where} > min_commission：不可為負數")
+    return trade
 
 
 def _parse_horizons(data: Mapping[str, Any], where: str) -> list[int]:

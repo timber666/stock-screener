@@ -53,7 +53,8 @@ def test_repo_config_loads() -> None:
         "range_breakdown",
         "ma_bear_alignment",
     ]
-    assert config.rules.exit_rules == ()
+    assert [r.id for r in config.rules.entry_rules] == ["bull_ma5_entry"]
+    assert [r.id for r in config.rules.exit_rules] == ["below_ma_exit", "max_hold_exit"]
     assert config.watchlist.stocks
 
 
@@ -295,6 +296,18 @@ def test_rules_fingerprint_ignores_entry_rules(config_dir: Path) -> None:
     assert rules_fingerprint(load_rules(path)) == original
 
     edit_yaml(path, lambda d: d.update(entry_rules=[]))
+    assert rules_fingerprint(load_rules(path)) == original
+
+
+def test_rules_fingerprint_ignores_exit_rules(config_dir: Path) -> None:
+    # 出場規則只用於交易回測；加入或修改都不可以讓成績單標註「規則有變更」（D56）
+    path = config_dir / "rules.yaml"
+    original = rules_fingerprint(load_rules(path))
+
+    edit_yaml(path, lambda d: d["exit_rules"][1]["params"].update(days=10))
+    assert rules_fingerprint(load_rules(path)) == original
+
+    edit_yaml(path, lambda d: d.update(exit_rules=[]))
     assert rules_fingerprint(load_rules(path)) == original
 
 

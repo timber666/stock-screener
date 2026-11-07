@@ -1,6 +1,6 @@
 # 台股技術面盤中選股系統：專案規劃書
 
-> 版本：v0.28（2026-11-07）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），出場規則已定義、尚未實作（5.4），空方的進出場先不做（D55）；M8 起的研究功能未規劃，見 `RESEARCH_PLAN.md`）
+> 版本：v0.29（2026-11-07）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 起的研究功能未規劃，見 `RESEARCH_PLAN.md`）
 >
 > 本文件是每日選股系統與共用部分的單一事實來源；研究功能（M7 起）的規劃在 `RESEARCH_PLAN.md`，兩者的邊界見 10.4。實作前請完整閱讀。標記「⚠️ 待確認」的項目是使用者尚未拍板的決定：請採用文中預設值，並保持可在設定檔調整，不要自行改變規則語意。已拍板的決定記錄在第 15 節，不需要再次詢問。
 
@@ -10,7 +10,7 @@
 
 - 交易規則（第 3–5 節）以本文件的定義為準。需求與本文件衝突，或定義不足以寫成程式時，先停下來詢問，不要自行詮釋。
 - 所有可調整的數字（均線天數、量比、天數區間等）一律放在設定檔，不可寫死在程式中。
-- 進場規則（5.5）只用於推播標示。出場規則已定義（5.4），目前**不實作**：每日的 `scan`、`update` 不使用，也不推播；要實作時先和使用者確認。
+- 進場規則（5.5）用於推播標示與交易回測。出場規則（5.4）只用於交易回測：每日的 `scan`、`update` 不使用，也不推播；要接到每日推播時先和使用者確認。
 - 不使用付費 API，不做自動下單。
 - 這是作品集專案：程式碼品質、測試、README 與本文件同等重要。
 - 規則或架構有變更時，同步更新本文件的對應章節與第 16 節變更紀錄。
@@ -49,7 +49,7 @@ M7 起在同一個專案進行量化研究：驗證哪些選股依據在台股�
 | 使用者自選的觀察清單（以科技股為主）；研究功能使用全市場資料（`RESEARCH_PLAN.md`） | 每日推播掃描全市場 |
 | 自訂分類（見 9.1）：產業鏈位置（族群 › 子分類，一檔一個）；只用於顯示與分組 | 分類參與篩選（例：族群轉強）、自動匯入官方產業分類、題材標籤（D31） |
 | 盤中掃描結果推播 Discord；研究的定期報告推播到另一個 Discord 頻道（D43） | 每日選股的盤後推播、網頁介面 |
-| 觸發訊號：多方與空方（D26）；推播標示符合進場（D54）；訊號回測（M6，見 14.1） | 推播出場訊號（規則已定義，見 5.4）、盤中即時監測（D52）、自動下單、交易回測（尚未規劃；研究的定期再平衡組合回測見 `RESEARCH_PLAN.md` M10） |
+| 觸發訊號：多方與空方（D26）；推播標示符合進場（D54）；訊號回測（M6，見 14.1）；交易回測（研究，`RESEARCH_PLAN.md` 4.2） | 推播出場訊號（規則已定義，見 5.4）、盤中即時監測（D52）、自動下單（研究的定期再平衡組合回測見 `RESEARCH_PLAN.md` M10） |
 
 ---
 
@@ -198,19 +198,19 @@ M7 起在同一個專案進行量化研究：驗證哪些選股依據在台股�
 - 現價 < 前低（不含今日，最近 `low_lookback_days` 日的最低價）
 - 不看成交量（D27）
 
-### 5.4 出場規則（已定義，尚未實作）
+### 5.4 出場規則（已定義，用於交易回測）
 
 多方部位只看收盤，下列條件先成立的當天以收盤價賣出（D51）：
 
 | 條件 | 定義 | 參數 |
 |---|---|---|
-| 跌破五日線 | 現價 < 今日 MA5；剛好等於 MA5 時不賣。判斷用未還原價（D8） | `ma`：5 |
-| 到期 | 進場後第 5 個交易日（進場當天不算） | `max_hold_days`：5 |
+| 跌破五日線 | 現價 < 今日 MA5；剛好等於 MA5 時不賣。判斷用未還原價（D8） | `below_ma_exit`：`ma` 5 |
+| 到期 | 進場後第 5 個交易日（進場當天不算） | `max_hold_exit`：`days` 5 |
 
 - 不設固定百分比的停損與停利（比較結果見 `RESEARCH_PLAN.md` 第 8 節）。
 - 只看收盤，所以沒有「同一天同時碰到停損與停利」的問題；代價是盤中跌再深也要等到收盤，實際虧損可能比預期大。
 - 收盤跌停鎖死賣不掉時，順延到之後第一個沒有收在跌停價的收盤，可以超過 5 天。跌停價的算法同 14.1。
-- 參數在實作時放進設定檔。目前沒有實作：每日的 `scan`、`update` 不使用這些規則，也不推播。`ExitRule` 介面、設定檔的 `exit_rules` 區塊（目前為空）與引擎的呼叫點都保留。
+- 設定在 `rules.yaml` 的 `exit_rules`，任一條成立就賣出，原因取 `rules.yaml` 順序的第一條。只有交易回測（`RESEARCH_PLAN.md` 4.2）使用；每日的 `scan`、`update` 不使用，也不推播出場提醒（系統不知道實際持股）。出場規則不列入規則檔指紋（D56）。
 
 ### 5.5 進場規則（已定義；推播標示已實作，交易回測尚未規劃）
 
@@ -467,7 +467,13 @@ entry_rules:                   # 進場規則（5.5）：只在推播標示「�
     enabled: true
     params: { ma: 5 }
 
-exit_rules: []                 # 已定義（5.4），尚未實作
+exit_rules:                    # 出場規則（5.4）：只用於交易回測，每日推播不使用；任一條成立就在收盤賣出
+  - id: below_ma_exit          # 收盤跌破 MA5
+    enabled: true
+    params: { ma: 5 }
+  - id: max_hold_exit          # 進場後第 5 個交易日
+    enabled: true
+    params: { days: 5 }
 ```
 
 ### 9.3 `config/settings.yaml`
@@ -497,7 +503,7 @@ discord:                     # 欄位同 finmind；被限流（HTTP 429）時改
   request_interval_sec: 1    # 多則訊息之間的間隔
 ```
 
-連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有 `backtest` 指令會讀取，欄位見 14.1；`research.yaml` 只有 `events`、`signal-report` 會讀取，見 9.5。
+連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有 `backtest`、`trade-backtest` 指令會讀取，欄位見 14.1 與 `RESEARCH_PLAN.md` 4.2；`research.yaml` 只有 `events`、`signal-report` 會讀取，見 9.5。
 
 ### 9.4 `.env`（不進版控，另提供 `.env.example`）
 
@@ -603,9 +609,17 @@ class EntryRule(Rule):         # 進場規則（5.5）：判斷當天觸發的�
     @abstractmethod
     def matches(self, ctx: StockContext, signals: Sequence[Signal]) -> bool: ...
 
-class ExitRule(Rule):          # 已定義（5.4），目前不實作任何子類別
+@dataclass(frozen=True)
+class Position:                # 持有中的部位，供出場規則判斷
+    code: str
+    entry_date: date
+    entry_price: float
+    held_days: int             # 進場後經過的交易日數，進場當天為 0
+
+class ExitRule(Rule):          # 出場規則（5.4）：只用於交易回測
+    side: ClassVar[Side]
     @abstractmethod
-    def evaluate(self, ctx: StockContext, position: Any) -> Signal | None: ...
+    def evaluate(self, ctx: StockContext, position: Position) -> Signal | None: ...
 ```
 
 規則以裝飾器註冊（例：`@register_rule("bull_ma5_breakout")`）。引擎讀取 `rules.yaml`，依 `id` 從註冊表建立已啟用的規則。
@@ -616,7 +630,7 @@ class ExitRule(Rule):          # 已定義（5.4），目前不實作任何子�
 2. 在 `rules.yaml` 的 `trigger_rules` 加入設定。規則 id 不存在、參數缺少、多出或型別不符時，執行時直接報錯。
 3. 在 `tests/rules/` 加上對應的測試。
 
-不需要修改引擎、資料層或推播程式。進場規則的做法相同：在 `rules/entry/` 新增、繼承 `EntryRule`，並加進 `rules.yaml` 的 `entry_rules`。
+不需要修改引擎、資料層或推播程式。進場、出場規則的做法相同：在 `rules/entry/`、`rules/exit/` 新增、繼承 `EntryRule`、`ExitRule`，並加進 `rules.yaml` 的 `entry_rules`、`exit_rules`。
 
 ### 10.3 設計原則
 
@@ -632,7 +646,7 @@ class ExitRule(Rule):          # 已定義（5.4），目前不實作任何子�
 
 | 項目 | 每日系統 | 研究功能 |
 |---|---|---|
-| 指令 | `update`、`scan`（排程執行）、`analyze` | `events`、`backtest`、`signal-report`（M7），以及之後的研究指令 |
+| 指令 | `update`、`scan`（排程執行）、`analyze` | `events`、`backtest`、`trade-backtest`、`signal-report`（M7），以及之後的研究指令 |
 | 程式 | `jobs/daily_update.py`、`jobs/intraday_scan.py`、`jobs/analyze.py` | `backtest/`、`research/`（M7 起）、`jobs/` 中研究指令的程式 |
 | 資料 | `data/screener.db`：觀察清單的日 K（`update` 寫入）、訊號紀錄（M7，`scan` 寫入，8.3）；`data/snapshots/`（MIS 原始資料，`scan` 寫入） | 讀取 `screener.db`；除權息與公司行動由 `events` 寫入 `screener.db`；全市場資料存在 `data/market.db`，輸出在 `data/backtest/`、`data/research/` |
 | 設定 | `settings.yaml`、`watchlist.yaml`、`rules.yaml` | `backtest.yaml`、`research.yaml` |
@@ -744,17 +758,19 @@ stock-screener/
 │   │   ├── filters/           # above_ma20（多方）、below_ma20（空方）
 │   │   ├── trigger/           # E1、E2、E4、E6 各一檔；E3、E5 在 ma_alignment.py
 │   │   ├── entry/             # 進場規則（5.5）：bull_ma5_entry
-│   │   └── exit/              # 保留
+│   │   └── exit/              # 出場規則（5.4）：below_ma_exit、max_hold_exit，只用於交易回測
 │   ├── engine.py
 │   ├── notify/
 │   │   ├── base.py            # 推播介面：Notifier
 │   │   ├── message.py         # 組成訊息、拆成多則（研究的報告共用）、錯誤通知（第 11 節）
 │   │   └── discord.py         # Discord webhook
 │   ├── formatting.py          # 顯示用的數字格式
-│   ├── backtest/              # 訊號回測（14.1）
+│   ├── backtest/              # 訊號回測（14.1）與交易回測（RESEARCH_PLAN.md 4.2）
 │   │   ├── signals.py         # 產生歷史訊號、標記、報酬
 │   │   ├── stats.py           # 分組統計
-│   │   └── report.py          # 終端摘要、CSV、Plotly 圖表報表
+│   │   ├── report.py          # 終端摘要、CSV、Plotly 圖表報表
+│   │   ├── trades.py          # 交易回測：進場訊號與出場、帳戶模擬、績效
+│   │   └── trade_report.py    # 交易回測的終端摘要、CSV 與圖表報表
 │   ├── research/              # 研究程式（M7 起，RESEARCH_PLAN.md 第 5 節）
 │   │   ├── signal_report.py   # 訊號成績單的計算：一致性、報酬、基準、除權息調整
 │   │   └── signal_report_output.py  # 成績單的 Discord 訊息與明細 CSV
@@ -763,6 +779,7 @@ stock-screener/
 │       ├── corporate_events.py  # 抓取除權息與公司行動、對照官方參考價
 │       ├── intraday_scan.py
 │       ├── backtest.py
+│       ├── trade_backtest.py  # 交易回測
 │       ├── signal_report.py   # 訊號成績單（研究頻道）
 │       └── analyze.py         # 工具指令：輸出轉折點與趨勢
 ├── scripts/
@@ -794,6 +811,8 @@ python -m screener analyze 2330 2454                   # 印出轉折點與趨�
 python -m screener analyze 2330 --date 2026-10-29      # 以該日日 K 當作「今日」
 python -m screener backtest                            # 訊號回測（14.1）
 python -m screener backtest --rules-file config/rules_test.yaml --rules range_breakout_volume --horizon 10
+python -m screener trade-backtest                      # 交易回測：觀察段的全部組合（RESEARCH_PLAN.md 4.2）
+python -m screener trade-backtest --validate --max-positions 5 --pick nearest_ma  # 驗證段只檢查選定的一組
 python -m screener signal-report                       # 上一週的訊號成績單，推播到研究頻道（RESEARCH_PLAN.md 4.1）
 python -m screener signal-report --end 2026-11-13 --dry-run  # 指定期間的最後一天，只印在終端
 ```
@@ -827,7 +846,7 @@ python -m screener signal-report --end 2026-11-13 --dry-run  # 指定期間的�
 | M5 | Discord 推播、錯誤通知、排程設定範例（以 Windows 工作排程器為主；執行時電腦須開機） | 交易日 13:10 自動收到訊息 | 完成（2026-11-02） |
 | M6 | 訊號回測：回補 2020-06 起的日 K、除權息與公司行動資料、還原價、歷史訊號的報酬統計（14.1） | `screener backtest` 輸出各規則的統計，並手算數例供使用者對照 | 完成（2026-11-01） |
 | M7–M11 | 研究功能：訊號紀錄與追蹤、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股 | 見 `RESEARCH_PLAN.md` 第 4 節 | M7 完成（2026-11-07，`RESEARCH_PLAN.md` 4.1）；M8 起未規劃 |
-| 之後 | 交易回測：模擬 5.4、5.5 的進出場，含挑選與部位上限 | 視需求另行規劃 | 規則已定義（D50、D51），交易回測未規劃 |
+| — | 交易回測：模擬 5.4、5.5 的進出場，含挑選與部位上限 | 見 `RESEARCH_PLAN.md` 4.2 | 完成（2026-11-07，D56） |
 
 M4、M5 的驗證：
 
@@ -1008,6 +1027,7 @@ M4、M5 的驗證：
 | D53 | 手續費折扣 | `backtest.yaml` 的 `commission_discount` 由 1（不打折）改為 0.28，為使用者實際的折扣；來回成本由 0.585% 變成約 0.38%。第 14.1 節第一次回測與 `RESEARCH_PLAN.md` 第 8 節較早的紀錄維持當時的 0.585%（14.1） |
 | D54 | 推播標示符合進場 | 使用者決定把進場規則接到每日推播：符合 5.5 的股票在訊息中標示「✅ 符合進場」，其他內容不變。現價已等於漲停價時不標示（D50 視為不成交）。進場規則放在 `rules.yaml` 的 `entry_rules`，只影響標示、不影響訊號，所以不列入規則檔指紋，成績單不會誤判規則有變更。標示不寫入訊號紀錄（D45 的資料表不變）。漲跌停價的計算由 `backtest/market.py` 移到共用的 `analysis/market.py`：每日系統現在也用到，且不可匯入研究程式（10.4 規則 1、2）。出場提醒要知道實際持股，不在這次範圍（5.5、第 11 節） |
 | D55 | 空方的進出場先不做 | 專案先以多方為主。多方規則的反向版本測過：平均報酬與超額都接近 0，連續漲停時回補不到（最差一筆 −71.08%，4989 榮科 2025-10），融券手續費、券源與強制回補也都還沒有計入。E4–E6 照常推播當作觀察，不標示符合進場。之後要做空，先取得融券與券源資料，並定好連續漲停時的風險上限（5.5；`RESEARCH_PLAN.md` 第 8 節） |
+| D56 | 交易回測與出場規則的實作 | 新增研究指令 `trade-backtest`，照 5.4、5.5 模擬 30 萬元的帳戶，帳戶設定見 `RESEARCH_PLAN.md` R6。出場規則實作為 `below_ma_exit`、`max_hold_exit`（`rules.yaml` 的 `exit_rules`），只有交易回測使用，每日的 `scan`、`update` 不呼叫、也不推播；出場規則不列入規則檔指紋，成績單不會誤判規則有變更。收在漲跌停的判斷與 14.1 相同，以「等於」漲跌停價判斷（14.2 的參考價疑點日不會誤判）。讀取歷史資料的程式由訊號回測與交易回測共用（10.4、第 12 節；`RESEARCH_PLAN.md` 4.2） |
 
 ### 15.2 待確認
 
@@ -1017,6 +1037,7 @@ M4、M5 的驗證：
 
 ## 16. 變更紀錄
 
+- v0.29（2026-11-07）：新增 D56：交易回測（`trade-backtest`，`RESEARCH_PLAN.md` 4.2）與出場規則 `below_ma_exit`、`max_hold_exit`（5.4、9.2、10.1、10.2），出場規則不列入規則檔指紋；`backtest.yaml` 新增 `trade` 區塊（9.3）；第 0、2、12、14 節與 10.4 的指令同步修改。每日的 `scan`、`update`、推播內容與訊號都沒有改變。
 - v0.28（2026-11-07）：新增 D55：空方的進出場先不做，專案先以多方為主（5.5）；測試結果見 `RESEARCH_PLAN.md` 第 8 節。規則、訊號與推播內容都沒有改變。
 - v0.27（2026-11-07）：新增 D54：符合進場規則的股票在推播標示「✅ 符合進場」（5.1、5.5、第 11 節）；新增進場規則 `bull_ma5_entry` 與 `EntryRule`、`rules.yaml` 的 `entry_rules`（9.2、10.1、10.2），不列入規則檔指紋；第 3 節新增「MA*n* 上揚」「過昨高」；`market.py` 移到 `analysis/`（第 12 節）。觸發規則、訊號與訊號紀錄都沒有改變。
 - v0.26（2026-11-07）：定義多方的進場規則（D50，5.5）與出場規則（D51，5.4），尚未實作，每日的 `scan`、`update` 與推播內容不變；新增 D52：先不做盤中即時監測；D53：手續費改為使用者實際的 2.8 折（`backtest.yaml`、14.1）。第 0 節、第 2 節、第 14 節同步修改；比較與驗證結果見 `RESEARCH_PLAN.md` 第 8 節。

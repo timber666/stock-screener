@@ -173,7 +173,7 @@ def write_html(result: "BacktestResult", backtest: BacktestConfig, horizon: int,
     header = (f"{result.start} ~ {result.end}｜觀察段至 {backtest.validation_start - timedelta(days=1)}，"
               f"驗證段 {backtest.validation_start} 起｜訊號 {len(result.signals):,} 個（去重後 {kept:,}）｜"
               f"報酬以還原權息的收盤價計算，超額 = 減去同日觀察清單的平均報酬")
-    path.write_text(_PAGE.format(header=header, body="\n".join(parts)), encoding="utf-8")
+    path.write_text(_PAGE.format(title="訊號回測報表", header=header, body="\n".join(parts)), encoding="utf-8")
 
 
 def _heatmap(result: "BacktestResult", backtest: BacktestConfig, names: list[str]) -> go.Figure:
@@ -247,14 +247,14 @@ def _excursions(result: "BacktestResult", horizon: int) -> go.Figure:
 
 _PAGE = """<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>訊號回測報表</title>
+<title>{title}</title>
 <style>
 body {{ font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; max-width: 1100px; margin: 24px auto;
        padding: 0 16px; color: #1f1f1d; background: #ffffff; }}
 h1 {{ font-size: 22px; font-weight: 500; }} h2 {{ font-size: 17px; font-weight: 500; margin-top: 36px; }}
 .note, .header {{ color: #5f5e5a; font-size: 14px; }}
 </style></head>
-<body><h1>訊號回測報表</h1><p class="header">{header}</p>
+<body><h1>{title}</h1><p class="header">{header}</p>
 {body}
 <p class="note">本報表僅供技術研究，不構成投資建議。</p></body></html>
 """

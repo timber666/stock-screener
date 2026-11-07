@@ -3,8 +3,10 @@
 import pytest
 
 from conftest import make_bars, make_context, set_bar
-from screener.models import Side, Signal, Trend
+from screener.models import Position, Side, Signal, Trend
 from screener.rules.entry.bull_ma5_entry import BullMa5Entry
+from screener.rules.exit.below_ma_exit import BelowMaExit
+from screener.rules.exit.max_hold_exit import MaxHoldExit
 from screener.rules.trigger.bear_ma5_breakdown import BearMa5Breakdown
 from screener.rules.trigger.bull_ma5_breakout import BullMa5Breakout
 from screener.rules.trigger.ma_alignment import MaBearAlignment, MaBullAlignment
@@ -315,3 +317,39 @@ def test_e5_needs_yesterdays_ma_to_confirm_formation() -> None:
 def test_bull_and_bear_alignment_are_exclusive() -> None:
     assert E5.evaluate(make_context(make_bars(FORMED_TODAY))) is None
     assert E3.evaluate(make_context(make_bars(FORMED_TODAY_BEAR))) is None
+
+
+# --- 出場規則（5.4）------------------------------------------------------------
+
+BELOW_MA_EXIT = BelowMaExit({"ma": 5})
+MAX_HOLD = MaxHoldExit({"days": 5})
+
+
+def held(days: int) -> Position:
+    return Position(code="2330", entry_date=make_bars([10.0]).index[0], entry_price=10.0, held_days=days)
+
+
+@pytest.mark.parametrize(
+    ("closes", "expected"),
+    [([10.0] * 5 + [9.0], True), ([10.0] * 6, False), ([10.0] * 5 + [11.0], False)],
+    ids=["below", "equal", "above"],
+)
+def test_below_ma_exit_requires_close_under_ma(closes: list[float], expected: bool) -> None:
+    signal = BELOW_MA_EXIT.evaluate(make_context(make_bars(closes)), held(1))
+
+    assert (signal is not None) is expected
+    if expected:
+        assert (signal.rule_name, signal.detail) == ("跌破均線", "現價 9 < MA5 9.8")
+
+
+@pytest.mark.parametrize(("days", "expected"), [(4, False), (5, True), (6, True)])
+def test_max_hold_exit_on_the_fifth_trading_day(days: int, expected: bool) -> None:
+    signal = MAX_HOLD.evaluate(make_context(make_bars([10.0] * 6)), held(days))
+
+    assert (signal is not None) is expected
+    if expected:
+        assert signal.detail == f"持有 {days} 個交易日"
+
+
+def test_exit_rules_are_long_side() -> None:
+    assert BelowMaExit.side is Side.LONG and MaxHoldExit.side is Side.LONG

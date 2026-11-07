@@ -1,11 +1,12 @@
 """規則引擎的流程（PROJECT_PLAN.md 5.1）：依方向分別判斷前置條件 → 適用趨勢 → 觸發規則。"""
 
 from collections.abc import Sequence
+from dataclasses import replace
 
 from conftest import REPO_CONFIG_DIR, make_bars, make_context
 from screener.config import load_config
 from screener.engine import Engine
-from screener.models import Side, Signal, StockContext, Trend
+from screener.models import Position, Side, Signal, StockContext, Trend
 from screener.rules.base import EntryRule, FilterRule, TriggerRule
 
 
@@ -105,8 +106,12 @@ def test_entry_rules_are_built_from_config_and_default_to_none() -> None:
     assert Engine(filters=[], trigger_rules=[]).entry_sides(CTX, []) == set()
 
 
-def test_exit_rules_are_reserved_and_empty() -> None:
+def test_exit_rules_come_from_config_and_fire_in_order() -> None:
     engine = Engine.from_config(load_config(REPO_CONFIG_DIR).rules)
+    falling = make_context(make_bars([10.0] * 5 + [9.0]))       # 現價 9 < MA5 9.8
+    held = Position(code="2330", entry_date=falling.bars.index[0], entry_price=10.0, held_days=5)
 
-    assert engine.exit_rules == []
-    assert engine.evaluate_exits(CTX, position=None) == []
+    assert [rule.id for rule in engine.exit_rules] == ["below_ma_exit", "max_hold_exit"]
+    assert [s.rule_name for s in engine.evaluate_exits(falling, held)] == ["跌破均線", "持有到期"]
+    assert engine.evaluate_exits(make_context(make_bars([10.0] * 6)), replace(held, held_days=4)) == []
+    assert Engine(filters=[], trigger_rules=[]).evaluate_exits(falling, held) == []

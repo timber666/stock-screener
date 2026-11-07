@@ -1,4 +1,4 @@
-# 訊號回測（PROJECT_PLAN.md 14.1）。只有 python -m screener backtest 會讀取這個檔案。
+# 訊號回測（PROJECT_PLAN.md 14.1）與交易回測（RESEARCH_PLAN.md 4.2）。只有 backtest、trade-backtest 指令會讀取這個檔案。
 # 日 K 要先回補到 signal_start 之前約半年（update --since 2020-06-01），讓每個訊號都有完整的計算區間。
 signal_start: 2021-01-01        # 訊號從這天起算
 validation_start: 2025-01-01    # 驗證段的第一天：之前為觀察段，可據以調整參數；之後只用來驗證
@@ -11,3 +11,12 @@ cost:
   commission_discount: 0.28     # 手續費折扣，例 0.28 = 2.8 折；1 = 不打折（D53）
   tax_pct: 0.3                  # 證交稅（%），賣出時收
 output_dir: data/backtest       # 輸出 signals.csv、summary.csv、report.html（不進版控）
+trade:                          # 交易回測：python -m screener trade-backtest（RESEARCH_PLAN.md 4.2）
+  initial_capital: 300000       # 初始資金（元）；觀察段、驗證段各自從這個金額開始
+  max_positions: [3, 5, 10]     # 同時最多幾檔，各跑一次；單筆金額 = 當天權益 ÷ 檔數上限
+  picks: [nearest_ma, volume_ratio]   # 訊號超過空位時的挑選方式：距均線最近、量比最大；隨機一定會跑
+  pick_ma: 5                    # nearest_ma 使用的均線
+  random_runs: 100              # 隨機挑選跑幾次，列出中位數與 5%～95% 範圍
+  random_seed: 42               # 固定種子，重跑結果相同
+  min_commission: 20            # 每筆最低手續費（元）
+  output_dir: data/backtest/trade   # observe/、validate/ 底下各有 summary.csv、trades.csv、equity.csv、report.html

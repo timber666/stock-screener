@@ -204,6 +204,16 @@ class StockContext:
 
 
 @dataclass(frozen=True)
+class Position:
+    """持有中的部位，供出場規則判斷（PROJECT_PLAN.md 5.4）。"""
+
+    code: str
+    entry_date: date
+    entry_price: float              # 進場日收盤（未還原）
+    held_days: int                  # 進場後經過的交易日數（該檔自己的日 K），進場當天為 0
+
+
+@dataclass(frozen=True)
 class Hit:
     """至少觸發一條同方向規則的股票。"""
 

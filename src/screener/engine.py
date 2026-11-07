@@ -2,10 +2,9 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from screener.config import RulesConfig
-from screener.models import Side, Signal, StockContext
+from screener.models import Position, Side, Signal, StockContext
 from screener.rules.base import EntryRule, ExitRule, FilterRule, TriggerRule, create_rules
 
 
@@ -44,6 +43,6 @@ class Engine:
         """符合進場規則的方向（5.5）。只判斷規則本身；漲跌停不成交要用參考價判斷，由呼叫端處理。"""
         return {rule.side for rule in self.entry_rules if rule.matches(ctx, signals)}
 
-    def evaluate_exits(self, ctx: StockContext, position: Any) -> list[Signal]:
-        """出場規則的呼叫點（5.4）。目前沒有任何出場規則的實作，也還沒有部位資料。"""
+    def evaluate_exits(self, ctx: StockContext, position: Position) -> list[Signal]:
+        """成立的出場規則（5.4），依 rules.yaml 的順序。只有交易回測會呼叫，每日推播不使用。"""
         return [signal for rule in self.exit_rules if (signal := rule.evaluate(ctx, position)) is not None]

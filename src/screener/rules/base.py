@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, ClassVar, TypeVar
 
 from screener.config import RuleConfig, check_keys, get_field, require
-from screener.models import Side, Signal, StockContext, Trend
+from screener.models import Position, Side, Signal, StockContext, Trend
 
 _RULE_PACKAGES = ("filters", "trigger", "entry", "exit")
 _REGISTRY: dict[str, type["Rule"]] = {}
@@ -74,10 +74,15 @@ class EntryRule(Rule):
 
 
 class ExitRule(Rule):
-    """出場規則：已定義（5.4），目前不實作任何子類別，只保留介面。"""
+    """出場規則（5.4）：持有中的部位是否在今天收盤賣出。只用於交易回測，每日推播不使用。"""
+
+    side: ClassVar[Side]
 
     @abstractmethod
-    def evaluate(self, ctx: StockContext, position: Any) -> Signal | None: ...
+    def evaluate(self, ctx: StockContext, position: Position) -> Signal | None: ...
+
+    def signal(self, detail: str) -> Signal:
+        return Signal(rule_id=self.id, rule_name=self.name, detail=detail, side=self.side)
 
 
 R = TypeVar("R", bound=Rule)
@@ -87,7 +92,7 @@ def register_rule(rule_id: str) -> Callable[[type[R]], type[R]]:
     def decorator(cls: type[R]) -> type[R]:
         if rule_id in _REGISTRY:
             raise ValueError(f"規則 id 重複註冊：{rule_id}")
-        if issubclass(cls, (FilterRule, TriggerRule, EntryRule)) and not isinstance(getattr(cls, "side", None), Side):
+        if issubclass(cls, (FilterRule, TriggerRule, EntryRule, ExitRule)) and not isinstance(getattr(cls, "side", None), Side):
             raise TypeError(f"規則 {rule_id} 必須以 side 指定多方或空方")
         cls.id = rule_id
         _REGISTRY[rule_id] = cls

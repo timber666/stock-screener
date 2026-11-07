@@ -40,4 +40,10 @@ entry_rules:                   # 進場規則（5.5）：只在推播標示「�
     enabled: true
     params: { ma: 5 }
 
-exit_rules: []                 # 已定義（5.4），尚未實作
+exit_rules:                    # 出場規則（5.4）：只用於交易回測，每日推播不使用；任一條成立就在收盤賣出
+  - id: below_ma_exit          # 收盤跌破 MA5
+    enabled: true
+    params: { ma: 5 }
+  - id: max_hold_exit          # 進場後第 5 個交易日
+    enabled: true
+    params: { days: 5 }

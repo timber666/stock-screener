@@ -68,6 +68,7 @@ python -m screener --help
 | `python -m screener scan --replay 2026-10-29` | 以該日日 K 當作「今日」重跑並推播（標題標示「回放」），供非交易時段測試與展示；加 `--dry-run` 只印在終端 |
 | `python -m screener analyze 2330 2454` | 印出轉折點、基本趨勢與破位修正後的趨勢，供檢查分析結果；`--date` 指定「今日」 |
 | `python -m screener backtest` | 訊號回測：統計每條規則觸發後的報酬，輸出摘要、CSV 與圖表報表 |
+| `python -m screener trade-backtest` | 交易回測：照進場與出場規則模擬 30 萬元的帳戶，比較檔數上限與挑選方式；`--validate` 只檢查選定的一組在驗證段的結果 |
 | `python -m screener signal-report` | 訊號成績單：上一週推播的訊號，收盤是否仍成立與之後的表現，推播到研究頻道；`--end` 指定期間的最後一天，`--dry-run` 只印在終端 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
@@ -130,6 +131,24 @@ python -m screener backtest
 - 2025 年以前為觀察段、之後為驗證段；同時列出去重（同檔同規則 5 個交易日內只算第一次）、排除收盤漲跌停鎖死、排除計算區間內有跳空事件的結果。
 - 輸出到 `data/backtest/`：`signals.csv`（每個訊號一列）、`summary.csv`（所有分組的統計）、`report.html`（總覽熱圖、觀察段 vs 驗證段、累積超額報酬、最大有利／不利幅度，用瀏覽器開啟）。
 - `--rules-file` 用另一份規則檔回測，不影響每日推播；`--rules` 只回測指定的規則；`--horizon` 改變摘要使用的持有天數。
+
+### 交易回測（`trade-backtest`）
+
+照進場規則（當天 E1、現價 > 昨日最高價、MA5 上揚，收盤買進）與出場規則（收盤跌破 MA5 或第 5 個交易日賣出）模擬一個帳戶。設定在 `config/backtest.yaml` 的 `trade`，規則在 `config/rules.yaml` 的 `entry_rules`、`exit_rules`；定義見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.2。需要的資料與訊號回測相同，先執行 `events`。
+
+```bash
+python -m screener trade-backtest
+```
+
+- 預設只跑觀察段（2021～2024），比較同時最多 3、5、10 檔與挑選方式（距 MA5 最近、量比最大、隨機 100 次）。約 2～3 分鐘。
+- 初始資金 30 萬元，單筆金額 = 當天權益 ÷ 檔數上限，買零股；手續費 2.8 折、每筆最低 20 元，賣出證交稅 0.3%，不計滑價。
+- 輸出到 `data/backtest/trade/observe/`：`summary.csv`（每種組合的報酬、回撤、勝率、資金使用率等）、`trades.csv`（每筆交易的股數、金額、手續費、損益與賣出原因）、`equity.csv`（每天的現金、持股市值、權益）、`report.html`（權益曲線含隨機挑選的範圍與基準、回撤）。
+- 確認結果的方法：在 `trades.csv` 挑幾筆對照線圖與手算損益；`equity.csv` 每天的權益 = 現金 + 持股市值，期末權益 − 30 萬 = 所有損益的合計；固定的挑選方式落在隨機的 5%～95% 範圍內時，代表看不出挑選能力。
+- 在觀察段選定一組後，才看那一組的驗證段（[PROJECT_PLAN.md](PROJECT_PLAN.md) D32），輸出到 `data/backtest/trade/validate/`：
+
+```bash
+python -m screener trade-backtest --validate --max-positions 5 --pick nearest_ma
+```
 
 #### 定期更新（建議每月一次）
 
