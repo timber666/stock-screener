@@ -1,10 +1,12 @@
 """規則引擎的流程（PROJECT_PLAN.md 5.1）：依方向分別判斷前置條件 → 適用趨勢 → 觸發規則。"""
 
+from collections.abc import Sequence
+
 from conftest import REPO_CONFIG_DIR, make_bars, make_context
 from screener.config import load_config
 from screener.engine import Engine
 from screener.models import Side, Signal, StockContext, Trend
-from screener.rules.base import FilterRule, TriggerRule
+from screener.rules.base import EntryRule, FilterRule, TriggerRule
 
 
 class StubFilter(FilterRule):
@@ -75,6 +77,32 @@ def test_repo_rules_long_and_short_filters_are_exclusive() -> None:
 
     assert (above.side, below.side) == (Side.LONG, Side.SHORT)
     assert not above.passes(flat) and not below.passes(flat)
+
+
+class StubEntry(EntryRule):
+    id = "stub_entry_rule"
+    name = "測試進場"
+
+    def __init__(self, result: bool, side: Side = Side.LONG) -> None:
+        super().__init__({})
+        self.result = result
+        self.side = side
+
+    def matches(self, ctx: StockContext, signals: Sequence[Signal]) -> bool:
+        return self.result
+
+
+def test_entry_sides_lists_the_sides_of_matching_rules() -> None:
+    engine = Engine(filters=[], trigger_rules=[], entry_rules=[StubEntry(True), StubEntry(False, side=Side.SHORT)])
+
+    assert engine.entry_sides(CTX, []) == {Side.LONG}
+
+
+def test_entry_rules_are_built_from_config_and_default_to_none() -> None:
+    engine = Engine.from_config(load_config(REPO_CONFIG_DIR).rules)
+
+    assert [rule.id for rule in engine.entry_rules] == ["bull_ma5_entry"]
+    assert Engine(filters=[], trigger_rules=[]).entry_sides(CTX, []) == set()
 
 
 def test_exit_rules_are_reserved_and_empty() -> None:

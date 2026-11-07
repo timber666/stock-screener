@@ -3,7 +3,8 @@
 import pytest
 
 from conftest import make_bars, make_context, set_bar
-from screener.models import Side, Trend
+from screener.models import Side, Signal, Trend
+from screener.rules.entry.bull_ma5_entry import BullMa5Entry
 from screener.rules.trigger.bear_ma5_breakdown import BearMa5Breakdown
 from screener.rules.trigger.bull_ma5_breakout import BullMa5Breakout
 from screener.rules.trigger.ma_alignment import MaBearAlignment, MaBullAlignment
@@ -14,7 +15,8 @@ from screener.rules.filters.below_ma20 import BelowMa20
 
 
 def test_each_rule_belongs_to_one_side() -> None:
-    assert {rule.side for rule in (AboveMa20, BullMa5Breakout, RangeBreakoutVolume, MaBullAlignment)} == {Side.LONG}
+    assert {rule.side for rule in (AboveMa20, BullMa5Breakout, RangeBreakoutVolume, MaBullAlignment,
+                                   BullMa5Entry)} == {Side.LONG}
     assert {rule.side for rule in (BelowMa20, BearMa5Breakdown, RangeBreakdown, MaBearAlignment)} == {Side.SHORT}
 
 # --- above_ma20 -------------------------------------------------------------
@@ -66,6 +68,41 @@ def test_e1_triggers_on_red_candle_crossing_ma5() -> None:
 @pytest.mark.parametrize("today_open", [10.4, 10.5], ids=["flat-candle", "black-candle"])
 def test_e1_requires_red_candle(today_open: float) -> None:
     assert E1.evaluate(e1_context(today_open=today_open)) is None
+
+
+# --- 多方進場（5.5）：E1 當天、現價過昨高、MA5 上揚 -----------------------------------
+
+ENTRY = BullMa5Entry({"ma": 5})
+
+
+def test_entry_matches_e1_above_yesterday_high_with_rising_ma5() -> None:
+    ctx = e1_context()                                  # 現價 10.4 > 昨高 9.6；MA5 10.0 > 昨日 9.92
+
+    assert ENTRY.matches(ctx, [E1.evaluate(ctx)]) is True
+
+
+def test_entry_requires_e1_today() -> None:
+    ctx = e1_context()
+    other = Signal("ma_bull_alignment", "三線多排", "detail", Side.LONG)
+
+    assert ENTRY.matches(ctx, [other]) is False
+    assert ENTRY.matches(ctx, []) is False
+
+
+def test_entry_requires_price_above_yesterday_high() -> None:
+    bars = set_bar(set_bar(make_bars(CROSS), -1, open=10.0), -2, high=10.4)     # 昨高 10.4 等於現價
+    ctx = make_context(bars, trend=Trend.BULL)
+    signal = E1.evaluate(ctx)
+
+    assert signal is not None and ENTRY.matches(ctx, [signal]) is False
+
+
+def test_entry_requires_rising_ma5() -> None:
+    # 5 根前的收盤 10.6 高於現價 10.4：MA5 10.0 < 昨日 10.04，但 E1 仍成立
+    ctx = e1_context([10.0, 10.6, 10.0, 10.0, 10.0, 9.6, 10.4])
+    signal = E1.evaluate(ctx)
+
+    assert signal is not None and ENTRY.matches(ctx, [signal]) is False
 
 
 def test_e1_requires_crossing() -> None:

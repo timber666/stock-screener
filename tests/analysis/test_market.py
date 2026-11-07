@@ -2,7 +2,7 @@
 
 import pytest
 
-from screener.backtest.market import limit_prices
+from screener.analysis.market import limit_prices
 
 
 @pytest.mark.parametrize(

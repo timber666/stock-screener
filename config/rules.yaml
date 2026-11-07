@@ -35,4 +35,9 @@ trigger_rules:                 # trends: bull | range | bear；空陣列 = 不�
     enabled: true
     params: { trends: [], mas: [5, 10, 20], only_on_formation: true }
 
-exit_rules: []                 # 保留，尚未實作
+entry_rules:                   # 進場規則（5.5）：只在推播標示「符合進場」，不影響觸發規則與趨勢
+  - id: bull_ma5_entry         # 多方：E1 當天，現價 > 昨高，MA5 上揚
+    enabled: true
+    params: { ma: 5 }
+
+exit_rules: []                 # 已定義（5.4），尚未實作

@@ -90,6 +90,21 @@ def is_below_ma(ctx: StockContext, n: int) -> bool:
     return not math.isnan(ma) and bool(ctx.today["close"] < ma)
 
 
+def is_ma_rising(ctx: StockContext, n: int) -> bool:
+    """MA n 上揚：今日 MA n > 昨日 MA n。"""
+    if ctx.yesterday is None:
+        return False
+    ma = ctx.ma(n)
+    if math.isnan(ma.iloc[-1]) or math.isnan(ma.iloc[-2]):
+        return False
+    return bool(ma.iloc[-1] > ma.iloc[-2])
+
+
+def is_above_yesterday_high(ctx: StockContext) -> bool:
+    """過昨高：現價 > 昨日最高價。"""
+    return ctx.yesterday is not None and bool(ctx.today["close"] > ctx.yesterday["high"])
+
+
 def prior_high(ctx: StockContext, days: int) -> float | None:
     """前高：不含今日，最近 days 根 K 棒的最高價；今日之前不足 days 根時為 None。"""
     highs = ctx.bars["high"].iloc[:-1]

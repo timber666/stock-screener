@@ -13,17 +13,35 @@ DAY = date(2026, 10, 30)
 
 def hit(code: str, group: str, subcategory: str | None, *rule_names: str, close: float = 123.5,
         change: float | None = 3.2, trend: Trend = Trend.BULL, side: Side = Side.LONG,
-        substitute: PriceSubstitute | None = None) -> Hit:
+        substitute: PriceSubstitute | None = None, entry: bool = False) -> Hit:
     info = StockInfo(code=code, name=f"股{code}", market=Market.TSE, group=group, subcategory=subcategory)
     ctx = make_context(make_bars([100.0, close]), trend=trend, info=info)
     signals = tuple(Signal("id", name, "detail", side) for name in rule_names)
-    return Hit(ctx=ctx, side=side, signals=signals, change_pct=change, price_substitute=substitute)
+    return Hit(ctx=ctx, side=side, signals=signals, change_pct=change, price_substitute=substitute, entry=entry)
 
 
 def report(*hits: Hit, not_evaluated: tuple[str, ...] = (), is_replay: bool = True,
            mismatch: tuple[str, ...] = ()) -> ScanReport:
     return ScanReport(day=DAY, is_replay=is_replay, observed=45, hits=hits, not_evaluated=not_evaluated,
                       scan_time=None if is_replay else "13:10", prev_close_mismatch=mismatch)
+
+
+def test_entry_is_marked_on_the_stock_line_only_when_it_matches() -> None:
+    text = format_report(report(
+        hit("3037", "PCB", "PCB製造", "多頭突破五日線紅K", entry=True),
+        hit("1000", "PCB", "PCB製造", "三線多排"),
+    ), INDUSTRIES)
+
+    assert "3037 股3037  123.5  ▲3.2%｜PCB製造｜多頭｜✅ 符合進場\n  └ 多頭突破五日線紅K" in text
+    assert "1000 股1000  123.5  ▲3.2%｜PCB製造｜多頭\n  └ 三線多排" in text
+
+
+def test_entry_mark_comes_before_the_substitute_warning() -> None:
+    text = format_report(report(
+        hit("3037", "PCB", "PCB製造", "多頭突破五日線紅K", entry=True, substitute=PriceSubstitute.BEST_BID),
+    ), INDUSTRIES)
+
+    assert "｜多頭｜✅ 符合進場｜⚠️ 價格為替代值（最佳買價）" in text
 
 
 def test_hits_are_grouped_by_industry_and_sorted_upstream_first() -> None:

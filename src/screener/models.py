@@ -212,6 +212,7 @@ class Hit:
     signals: tuple[Signal, ...]
     change_pct: float | None        # 漲跌幅（%）；回放以前一日收盤計算，盤中以 MIS 參考價計算
     price_substitute: PriceSubstitute | None = None     # 盤中沒有成交價時現價的替代來源（8.2）
+    entry: bool = False             # 符合進場規則（5.5），推播時標示
 
 
 @dataclass(frozen=True)

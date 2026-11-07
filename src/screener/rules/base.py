@@ -1,6 +1,6 @@
 """規則介面與註冊表（PROJECT_PLAN.md 10.1、10.2）。
 
-新增規則：在 rules/filters、rules/trigger 或 rules/exit 新增模組，繼承對應的類別並以
+新增規則：在 rules/filters、rules/trigger、rules/entry 或 rules/exit 新增模組，繼承對應的類別並以
 @register_rule("id") 註冊，再到 rules.yaml 加入設定。模組會被自動匯入，不需要修改引擎。
 """
 
@@ -13,7 +13,7 @@ from typing import Any, ClassVar, TypeVar
 from screener.config import RuleConfig, check_keys, get_field, require
 from screener.models import Side, Signal, StockContext, Trend
 
-_RULE_PACKAGES = ("filters", "trigger", "exit")
+_RULE_PACKAGES = ("filters", "trigger", "entry", "exit")
 _REGISTRY: dict[str, type["Rule"]] = {}
 
 
@@ -64,8 +64,17 @@ class TriggerRule(Rule):
         return Signal(rule_id=self.id, rule_name=self.name, detail=detail, side=self.side)
 
 
+class EntryRule(Rule):
+    """進場規則（5.5）：判斷當天觸發的候選是否符合進場，不影響觸發規則與趨勢。"""
+
+    side: ClassVar[Side]
+
+    @abstractmethod
+    def matches(self, ctx: StockContext, signals: Sequence[Signal]) -> bool: ...
+
+
 class ExitRule(Rule):
-    """停損／出場規則：保留介面，目前不實作任何子類別（5.4）。"""
+    """出場規則：已定義（5.4），目前不實作任何子類別，只保留介面。"""
 
     @abstractmethod
     def evaluate(self, ctx: StockContext, position: Any) -> Signal | None: ...
@@ -78,7 +87,7 @@ def register_rule(rule_id: str) -> Callable[[type[R]], type[R]]:
     def decorator(cls: type[R]) -> type[R]:
         if rule_id in _REGISTRY:
             raise ValueError(f"規則 id 重複註冊：{rule_id}")
-        if issubclass(cls, (FilterRule, TriggerRule)) and not isinstance(getattr(cls, "side", None), Side):
+        if issubclass(cls, (FilterRule, TriggerRule, EntryRule)) and not isinstance(getattr(cls, "side", None), Side):
             raise TypeError(f"規則 {rule_id} 必須以 side 指定多方或空方")
         cls.id = rule_id
         _REGISTRY[rule_id] = cls
@@ -88,7 +97,7 @@ def register_rule(rule_id: str) -> Callable[[type[R]], type[R]]:
 
 
 def load_builtin_rules() -> None:
-    """匯入 rules/filters、entry、exit 下的所有模組，讓它們完成註冊。"""
+    """匯入 rules/filters、trigger、entry、exit 下的所有模組，讓它們完成註冊。"""
     for package_name in _RULE_PACKAGES:
         package = importlib.import_module(f"{__package__}.{package_name}")
         for module in pkgutil.iter_modules(package.__path__):

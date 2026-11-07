@@ -8,7 +8,7 @@ from conftest import REPO_CONFIG_DIR
 from screener.config import ConfigError, RuleConfig, load_config
 from screener.models import Side
 from screener.rules import base
-from screener.rules.base import FilterRule, TriggerRule, create_rules, load_builtin_rules, register_rule
+from screener.rules.base import EntryRule, FilterRule, TriggerRule, create_rules, load_builtin_rules, register_rule
 
 E1_PARAMS = {"trends": ["bull"], "ma": 5}
 
@@ -34,6 +34,32 @@ def test_repo_rules_config_builds() -> None:
         ("多頭突破五日線紅K", Side.LONG), ("盤整長紅爆量過前高", Side.LONG), ("三線多排", Side.LONG),
         ("空頭跌破五日線黑K", Side.SHORT), ("盤整長黑破前低", Side.SHORT), ("三線空排", Side.SHORT),
     ]
+
+
+def test_repo_entry_rules_build() -> None:
+    rules = load_config(REPO_CONFIG_DIR).rules
+
+    assert [(r.id, r.side) for r in create_rules(rules.entry_rules, EntryRule, "entry_rules")] == [
+        ("bull_ma5_entry", Side.LONG),
+    ]
+
+
+def test_trigger_rule_is_rejected_under_entry_rules() -> None:
+    with pytest.raises(ConfigError, match="bull_ma5_breakout：此規則不能放在 entry_rules"):
+        create_rules(trigger("bull_ma5_breakout", E1_PARAMS), EntryRule, "entry_rules")
+
+
+def test_entry_rule_without_side_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(base, "_REGISTRY", {})
+
+    class NoSide(EntryRule):
+        name = "沒有方向"
+
+        def matches(self, ctx, signals) -> bool:
+            return True
+
+    with pytest.raises(TypeError, match="必須以 side 指定多方或空方"):
+        register_rule("no_side_entry")(NoSide)
 
 
 def test_disabled_rule_is_skipped_but_still_validated() -> None:

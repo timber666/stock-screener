@@ -31,8 +31,8 @@ import pandas as pd
 
 from screener.analysis.adjustment import event_factors
 from screener.analysis.context import bars_to_frame, build_context
+from screener.analysis.market import limit_prices
 from screener.analysis.numeric import normalize
-from screener.backtest.market import limit_prices
 from screener.backtest.stats import DEDUPED, EXCLUDE, INCLUDE, RAW_PRICE, SUMMARY_COLUMNS, VALIDATE
 from screener.config import TrendConfig
 from screener.data.base import EventCoverage, EventStore, PriceStore, ScanStore

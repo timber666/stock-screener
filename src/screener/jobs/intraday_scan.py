@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TextIO
 
 from screener.analysis.context import bars_to_frame, build_context
+from screener.analysis.market import limit_prices
 from screener.analysis.numeric import normalize
 from screener.config import AppConfig, MisSettings, TrendConfig, rules_fingerprint
 from screener.data.base import DataSourceError, PriceStore, QuoteSource
@@ -167,7 +168,7 @@ def intraday_scan(
 
         ctx = build_context(stock, bars_to_frame([*history, bar]), trend_config, is_tentative=True)
         hits += _evaluate(ctx, engine, change_pct=_change_from_reference(bar.close, quote.prev_close),
-                          price_substitute=substitute)
+                          price_substitute=substitute, reference=quote.prev_close)
 
     if len(not_evaluated) == len(stocks):
         raise JobFailed(f"觀察清單沒有任何股票 {today} 有成交：尚未開盤，或 MIS 資料異常")
@@ -282,17 +283,31 @@ def _change_from_previous_close(ctx: StockContext) -> float | None:
 # --- 共用 -------------------------------------------------------------------
 
 def _evaluate(ctx: StockContext, engine: Engine, *, change_pct: float | None,
-              price_substitute: PriceSubstitute | None = None) -> list[Hit]:
-    """執行規則引擎，依方向整理成 Hit（每個有觸發的方向一筆）。"""
+              price_substitute: PriceSubstitute | None = None, reference: float | None = None) -> list[Hit]:
+    """執行規則引擎，依方向整理成 Hit（每個有觸發的方向一筆），並標示是否符合進場（5.5）。
+
+    reference 為 MIS 參考價；回放沒有時，漲跌停價改以前一日收盤計算。
+    """
     signals = engine.evaluate(ctx)
     for signal in signals:
         logger.info("%s %s %s｜%s %s：%s", ctx.info.code, ctx.info.name, ctx.trend.label,
                     signal.side.label, signal.rule_name, signal.detail)
+    entry_sides = {side for side in engine.entry_sides(ctx, signals) if not _at_price_limit(ctx, side, reference)}
+    for side in entry_sides:
+        logger.info("%s %s %s｜%s 符合進場", ctx.info.code, ctx.info.name, ctx.trend.label, side.label)
     return [
-        Hit(ctx=ctx, side=side, signals=side_signals, change_pct=change_pct, price_substitute=price_substitute)
+        Hit(ctx=ctx, side=side, signals=side_signals, change_pct=change_pct, price_substitute=price_substitute,
+            entry=side in entry_sides)
         for side in Side
         if (side_signals := tuple(signal for signal in signals if signal.side is side))
     ]
+
+
+def _at_price_limit(ctx: StockContext, side: Side, reference: float | None) -> bool:
+    """現價已在該方向的漲跌停價（多方漲停、空方跌停）：視為不成交，不標示符合進場（5.5）。"""
+    up, down = limit_prices(float(ctx.yesterday["close"] if reference is None else reference))
+    price = normalize(ctx.today["close"])
+    return bool(price >= normalize(up) if side is Side.LONG else price <= normalize(down))
 
 
 def _side_counts(hits: Sequence[Hit]) -> tuple[int, int]:

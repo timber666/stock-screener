@@ -8,10 +8,12 @@ from screener.rules.conditions import (
     crosses_above_ma,
     crosses_below_ma,
     is_above_ma,
+    is_above_yesterday_high,
     is_below_ma,
     is_black,
     is_long_black,
     is_long_red,
+    is_ma_rising,
     is_red,
     is_strictly_ascending,
     is_strictly_descending,
@@ -26,6 +28,28 @@ from screener.rules.conditions import (
 def two_days(prev_close: float, open_: float, close: float, prev_volume: int = 1000, volume: int = 1000):
     bars = make_bars([prev_close, close])
     return make_context(set_bar(set_bar(bars, -2, volume=prev_volume), -1, open=open_, volume=volume))
+
+
+# --- 過昨高、MA 上揚（5.5）------------------------------------------------------
+
+@pytest.mark.parametrize(("close", "expected"), [(10.6, True), (10.5, False), (10.4, False)], ids=["above", "equal", "below"])
+def test_above_yesterday_high_uses_high_not_close(close: float, expected: bool) -> None:
+    bars = set_bar(make_bars([10.0, close]), -2, high=10.5)
+
+    assert is_above_yesterday_high(make_context(bars)) is expected
+
+
+def test_above_yesterday_high_needs_yesterday() -> None:
+    assert is_above_yesterday_high(make_context(make_bars([10.0]))) is False
+
+
+@pytest.mark.parametrize(
+    ("closes", "expected"),
+    [([10.0] * 5 + [11.0], True), ([10.0] * 6, False), ([10.0] * 5 + [9.0], False), ([10.0] * 5, False), ([10.0], False)],
+    ids=["rising", "flat", "falling", "no-yesterday-ma", "one-bar"],
+)
+def test_ma_rising_compares_today_with_yesterday(closes: list[float], expected: bool) -> None:
+    assert is_ma_rising(make_context(make_bars(closes)), 5) is expected
 
 
 # --- 紅 K、長紅 --------------------------------------------------------------

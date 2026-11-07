@@ -17,8 +17,8 @@ import pandas as pd
 
 from screener.analysis.adjustment import adjust_bars, event_factors, trading_day_index
 from screener.analysis.context import bars_to_frame, build_context
+from screener.analysis.market import limit_prices
 from screener.analysis.numeric import normalize
-from screener.backtest.market import limit_prices
 from screener.config import TrendConfig
 from screener.data.base import EventStore, PriceStore
 from screener.data.isin import NO_PRICE_LIMIT_DAYS

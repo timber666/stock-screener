@@ -286,10 +286,22 @@ def test_rules_fingerprint_is_unchanged_by_renaming() -> None:
     assert rules_fingerprint(rules) == "3f2828187c1e"
 
 
-def test_old_rules_key_is_rejected(config_dir: Path) -> None:
+def test_rules_fingerprint_ignores_entry_rules(config_dir: Path) -> None:
+    # 進場規則只影響推播標示，不影響訊號；改動時成績單不可以標註「規則有變更」（D54）
+    path = config_dir / "rules.yaml"
+    original = rules_fingerprint(load_rules(path))
+
+    edit_yaml(path, lambda d: d["entry_rules"][0]["params"].update(ma=10))
+    assert rules_fingerprint(load_rules(path)) == original
+
+    edit_yaml(path, lambda d: d.update(entry_rules=[]))
+    assert rules_fingerprint(load_rules(path)) == original
+
+
+def test_old_layout_with_triggers_under_entry_rules_is_rejected(config_dir: Path) -> None:
     edit_yaml(config_dir / "rules.yaml", lambda d: d.update(entry_rules=d.pop("trigger_rules")))
 
-    with pytest.raises(ConfigError, match="未知的欄位 `entry_rules`"):
+    with pytest.raises(ConfigError, match="缺少必要欄位 `trigger_rules`"):
         load_config(config_dir)
 
 

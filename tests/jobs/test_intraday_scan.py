@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from conftest import REPO_CONFIG_DIR, make_bars
+from conftest import REPO_CONFIG_DIR, load_fixture, make_bars, to_bars
 from screener.config import load_config, rules_fingerprint
 from screener.data.base import DataSourceError
 from screener.data.db import SqlitePriceStore
@@ -20,7 +20,8 @@ from screener.engine import Engine
 from screener.jobs import JobFailed
 from screener.jobs import intraday_scan as intraday_scan_module
 from screener.jobs.intraday_scan import intraday_scan, replay_scan, run
-from screener.models import DailyBar, Market, PriceSubstitute, Quote, ScanRun, Side, SignalRecord, StockInfo, Trend
+from screener.models import (DailyBar, Market, PriceSubstitute, Quote, ScanRun, Side, SignalRecord, StockContext,
+                             StockInfo, Trend)
 from screener.notify.base import NotifyError
 
 CONFIG = load_config(REPO_CONFIG_DIR)
@@ -139,6 +140,75 @@ def test_long_report_is_split(replay_config, monkeypatch: pytest.MonkeyPatch) ->
 def test_push_failure_fails_the_job(replay_config) -> None:
     with pytest.raises(JobFailed, match="推播失敗（第 1/1 則）"):
         run(replay_config, replay=DAY, notifier=FakeNotifier(fail=True))
+
+
+# --- 符合進場（5.5）----------------------------------------------------------
+
+# bull_zigzag 的趨勢為多頭，最後一天（02-05）收盤 114 = 昨高，5 根前的收盤 123，所以今日現價 > 123 時 MA5 上揚。
+# 現價 122～125 都觸發 E1。以昨收 114 計算的漲停價為 125（114 × 1.1 = 125.4，升降單位 0.5）。
+ZIGZAG = to_bars(load_fixture("bull_zigzag"))
+ZIGZAG_NOW = datetime(2026, 2, 6, 13, 10)
+
+
+def entry_hit(tmp_path: Path, *, last: float, prev_close: float = 114.0):
+    """盤中掃描 bull_zigzag 的下一個交易日，回傳唯一的 Hit。"""
+    quote_ = Quote(code="1111", date=ZIGZAG_NOW.date(), open=120.0, high=last, low=120.0, last=last,
+                   prev_close=prev_close, volume=1500, best_bid=last - 0.5, best_ask=last + 0.5)
+    with SqlitePriceStore(tmp_path / "zigzag.db") as store:
+        store.upsert_bars(daily_bars("1111", ZIGZAG))
+        report = intraday_scan([stock("1111")], source=FakeQuotes([quote_]), store=store, engine=ENGINE,
+                               trend_config=CONFIG.rules.trend, settings=MIS, now=ZIGZAG_NOW, sleep=FakeSleep())
+    (hit,) = report.hits
+    assert "bull_ma5_breakout" in [signal.rule_id for signal in hit.signals]
+    return hit
+
+
+@pytest.mark.parametrize(
+    ("last", "prev_close", "expected"),
+    [(124.0, 114.0, True), (122.0, 114.0, False), (125.0, 114.0, False), (125.0, 116.0, True)],
+    ids=["matches", "ma5-falling", "at-limit-up", "limit-up-from-mis-reference"],
+)
+def test_intraday_marks_entry(tmp_path: Path, last: float, prev_close: float, expected: bool) -> None:
+    assert entry_hit(tmp_path, last=last, prev_close=prev_close).entry is expected
+
+
+def zigzag_with_today(close: float) -> pd.DataFrame:
+    today = pd.DataFrame({"open": [120.0], "high": [close], "low": [120.0], "close": [close], "volume": [1500]},
+                         index=pd.Index([ZIGZAG_NOW.date()], name="date"))
+    return pd.concat([ZIGZAG, today])
+
+
+@pytest.mark.parametrize(("close", "expected"), [(124.0, True), (125.0, False)], ids=["matches", "at-limit-up"])
+def test_replay_marks_entry_with_limit_from_previous_close(tmp_path: Path, close: float, expected: bool) -> None:
+    with SqlitePriceStore(tmp_path / "zigzag.db") as store:
+        store.upsert_bars(daily_bars("1111", zigzag_with_today(close)))
+        report = scan(store, [stock("1111")], day=ZIGZAG_NOW.date())
+
+    (hit,) = report.hits
+    assert hit.entry is expected
+
+
+def test_entry_mark_reaches_the_message_and_only_on_that_stock(tmp_path: Path) -> None:
+    with SqlitePriceStore(tmp_path / "screener.db") as store:
+        store.upsert_bars(daily_bars("1111", zigzag_with_today(124.0)))
+    watchlist = replace(CONFIG.watchlist, stocks=(stock("1111"),))
+    config = replace(CONFIG, watchlist=watchlist, settings=settings_in(tmp_path))
+    out = io.StringIO()
+
+    run(config, replay=ZIGZAG_NOW.date(), notifier=None, out=out)
+
+    assert "1111 股1111  124  ▲8.8%｜銅箔基板｜多頭｜✅ 符合進場\n  └ 多頭突破五日線紅K" in out.getvalue()
+
+
+@pytest.mark.parametrize(
+    ("side", "price", "expected"),
+    [(Side.LONG, 110.0, True), (Side.LONG, 109.5, False), (Side.SHORT, 90.0, True), (Side.SHORT, 90.5, False)],
+    ids=["long-at-up", "long-below-up", "short-at-down", "short-above-down"],
+)
+def test_at_price_limit_depends_on_the_side(side: Side, price: float, expected: bool) -> None:
+    ctx = StockContext(info=stock("1111"), bars=make_bars([100.0, price]), is_tentative=False, pivots=[], trend=Trend.RANGE)
+
+    assert intraday_scan_module._at_price_limit(ctx, side, reference=100.0) is expected
 
 
 # --- 盤中 -------------------------------------------------------------------
