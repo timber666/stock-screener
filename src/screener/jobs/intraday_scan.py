@@ -225,7 +225,7 @@ def _prev_close_matches(quote: Quote, history: Sequence[DailyBar]) -> bool:
 def _tentative_bar(quote: Quote, today: date) -> tuple[DailyBar | None, PriceSubstitute | None]:
     """以 MIS 快照合成今日暫定 K 棒（第 6 節），並回傳現價的替代來源（不是替代值時為 None）。
 
-    沒有成交價時依序改用最佳買價、最佳賣價的第一檔（跌停鎖死時沒有買單，賣價即跌停價，D28）。
+    沒有成交價時依序改用最佳買價、最佳賣價（跌停鎖死時沒有買單，賣價通常即跌停價，D28）。
     今日尚無成交（開盤價為 "-"），或成交價與買賣價都沒有時，暫定 K 棒為 None（8.2）。
     """
     if quote.open is None or quote.high is None or quote.low is None or quote.volume is None:

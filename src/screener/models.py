@@ -140,13 +140,13 @@ class Quote:
     last: float | None              # 最新成交價（MIS 的 z，為 "-" 時用最後一筆成交 trade.z，D47）；None：兩者都沒有
     prev_close: float | None        # 參考價（昨收；除權息日為除權息參考價）
     volume: int | None              # 累積成交量（張），只含一般交易
-    best_bid: float | None          # 最佳買價第一檔；跌停鎖死時沒有買單
-    best_ask: float | None          # 最佳賣價第一檔；漲停鎖死時沒有賣單
+    best_bid: float | None          # 最佳買價（第一個有價格的檔位，D48）；跌停鎖死時沒有買單
+    best_ask: float | None          # 最佳賣價（第一個有價格的檔位，D48）；漲停鎖死時沒有賣單
     raw: Mapping[str, Any] | None = field(default=None, compare=False, repr=False)  # MIS 原始資料列，供存檔（D46）
 
     def current_price(self) -> tuple[float | None, "PriceSubstitute | None"]:
-        """盤中的現價與替代來源（不是替代值時為 None）：成交價，沒有時依序改用最佳買價、最佳賣價的第一檔
-        （跌停鎖死時沒有買單，賣價即跌停價，D28）。三者都沒有時現價為 None。"""
+        """盤中的現價與替代來源（不是替代值時為 None）：成交價，沒有時依序改用最佳買價、最佳賣價
+        （跌停鎖死時沒有買單，賣價通常即跌停價，D28）。三者都沒有時現價為 None。"""
         for price, substitute in ((self.last, None), (self.best_bid, PriceSubstitute.BEST_BID),
                                   (self.best_ask, PriceSubstitute.BEST_ASK)):
             if price is not None:

@@ -20,7 +20,7 @@ from conftest import FIXTURES_DIR, FakeResponse, FakeSession, FakeTime
 from screener.config import MisSettings
 from screener.data.base import DataSourceError
 from screener.data.mis import API_URL, MisClient
-from screener.models import Market, Quote, StockInfo
+from screener.models import Market, PriceSubstitute, Quote, StockInfo
 
 SETTINGS = MisSettings(timeout_sec=10, retry=2, retry_backoff_sec=3, request_interval_sec=3, batch_size=50,
                        missing_price_retry=1, missing_price_wait_sec=5)
@@ -95,6 +95,30 @@ def test_dash_means_no_value() -> None:
     fields = (quote.open, quote.high, quote.low, quote.last, quote.volume, quote.best_bid, quote.best_ask)
     assert fields == (None,) * 7
     assert quote.prev_close == 2415.0
+
+
+@pytest.mark.parametrize(
+    ("bid", "ask", "best_bid", "best_ask"),
+    [("-", "0.0000_1335.0000_1340.0000_", None, 1335.0),
+     ("0.0000_1500.0000_1495.0000_", "-", 1500.0, None),
+     ("-", "0.0000_", None, None)],
+    ids=["limit-down-lock", "limit-up-lock", "only-zero-price"],
+)
+def test_zero_price_level_is_skipped(bid: str, ask: str, best_bid: float | None, best_ask: float | None) -> None:
+    # 盤中鎖死時第一檔的價格是 0.0000，第二檔才是實際價格（2026-11-03～06 實測 94 檔次，例：1303 的賣價
+    # "0.0000_271.0000_271.5000_"，第二檔即跌停價）
+    quote = make_client(FakeSession(body(record("2308", b=bid, a=ask)))).fetch_quotes([stock("2308")])["2308"]
+
+    assert (quote.best_bid, quote.best_ask) == (best_bid, best_ask)
+
+
+def test_limit_down_lock_without_trade_price_uses_the_ask() -> None:
+    # 跌停鎖死、沒有買單，成交價也拿不到時，替代價是賣價（D28），不可以因為第一檔是 0.0000 而不評估
+    locked = record("2308", z="-", b="-", a="0.0000_1335.0000_1340.0000_", trade={"t": "13:10:00", "v": 1, "z": "-"})
+
+    quote = make_client(FakeSession(body(locked))).fetch_quotes([stock("2308")])["2308"]
+
+    assert quote.current_price() == (1335.0, PriceSubstitute.BEST_ASK)
 
 
 def test_last_price_falls_back_to_last_trade_during_session() -> None:
