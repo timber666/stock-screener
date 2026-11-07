@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M6（訊號回測）與 M5（推播與排程）；M7（訊號紀錄與每週成績單）實作完成、待交易日驗證。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
+> 🚧 開發中：已完成 M0–M7（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
 
 ## 架構
 
