@@ -10,8 +10,9 @@ from typing import Any
 
 import pytest
 
-from conftest import FIXTURES_DIR
+from conftest import FIXTURES_DIR, REPO_CONFIG_DIR
 from screener.__main__ import EXIT_CONFIG_ERROR, main
+from screener.config import load_research_config
 from screener.data.base import DataSourceError
 from screener.jobs import JobFailed
 from screener.jobs.market_update import RawArchive, Sources, update_market
@@ -20,6 +21,7 @@ from screener.research.market.models import Delisting
 from screener.research.market.store import SqliteMarketStore
 
 TODAY = date(2026, 11, 7)
+MARKET = load_research_config(REPO_CONFIG_DIR / "research.yaml").market
 
 
 def fixture(name: str) -> Any:
@@ -76,6 +78,23 @@ class FakeExchange:
         self.calls.append(("return_index", month))
         return fixture("twse_return_index") if month == date(2026, 10, 1) else {"stat": "很抱歉，沒有符合條件的資料!"}
 
+    def valuation(self, day: date) -> Any:
+        self.calls.append(("valuation", day))
+        return fixture("twse_valuation_20261106" if self.market is Market.TSE else "tpex_valuation_20261106")
+
+    def shares(self, day: date) -> Any:
+        self.calls.append(("shares", day))
+        return fixture("twse_shares_20261106")
+
+
+class FakeMops:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def revenue_page(self, market: Market, month: date, *, foreign: bool) -> bytes:
+        self.calls.append((market, month, foreign))
+        return (FIXTURES_DIR / "market" / "mops_revenue_sii.html").read_bytes()
+
 
 class FakeCalendar:
     def __init__(self, days: Sequence[date]) -> None:
@@ -96,12 +115,13 @@ def make_sources(trading: Sequence[date], calendar: Sequence[date] | None = None
                  tse_trading: Sequence[date] | None = None, fail_on: Sequence[date] = ()) -> Sources:
     return Sources(twse=FakeExchange(Market.TSE, trading if tse_trading is None else tse_trading, fail_on=fail_on),
                    tpex=FakeExchange(Market.OTC, trading),
-                   finmind=FakeCalendar(trading if calendar is None else calendar))
+                   finmind=FakeCalendar(trading if calendar is None else calendar), mops=FakeMops())
 
 
 def run(tmp_path: Path, sources: Sources, start: date, end: date, today: date = TODAY):
     with SqliteMarketStore(tmp_path / "market.db") as store:
-        return update_market(store, sources, archive=RawArchive(tmp_path / "raw"), start=start, end=end, today=today)
+        return update_market(store, sources, MARKET, archive=RawArchive(tmp_path / "raw"), start=start, end=end,
+                             today=today)
 
 
 def daily_calls(sources: Sources) -> list[date]:
@@ -193,7 +213,7 @@ def test_events_are_fetched_per_month_and_year(tmp_path: Path) -> None:
 
     summary = run(tmp_path, sources, date(2026, 9, 30), OCT_12)
 
-    assert [c for c in sources.twse.calls if c[0] != "daily"] == [
+    assert [c for c in sources.twse.calls if c[0] not in ("daily", "valuation", "shares")] == [
         ("dividends", date(2026, 9, 1), date(2026, 9, 30)), ("return_index", date(2026, 9, 1)),
         ("dividends", date(2026, 10, 1), date(2026, 10, 31)), ("return_index", date(2026, 10, 1)),
         ("reductions", date(2026, 1, 1), date(2026, 12, 31)),
@@ -237,3 +257,103 @@ def test_securities_are_rebuilt_from_quotes(tmp_path: Path) -> None:
 def test_end_must_be_before_today(config_dir: Path) -> None:
     assert main(["--config-dir", str(config_dir), "market-update", "--end", date.today().isoformat()]) \
         == EXIT_CONFIG_ERROR
+
+
+# --- 基本面（M9，RESEARCH_PLAN.md 4.4、4.5）------------------------------------------
+
+def fundamental_calls(exchange: FakeExchange, kind: str) -> list[date]:
+    return [call[1] for call in exchange.calls if call[0] == kind]
+
+
+def test_fundamentals_fetch_published_revenue_and_monthly_samples(tmp_path: Path) -> None:
+    sources = make_sources([date(2026, 10, 12), date(2026, 10, 13), date(2026, 11, 2)])
+
+    summary = run(tmp_path, sources, date(2026, 10, 12), date(2026, 11, 2), today=date(2026, 11, 7))
+
+    # 10 月的營收要到 11/10 之後才抓；11 月還沒有
+    assert sources.mops.calls == []
+    assert fundamental_calls(sources.twse, "valuation") == [date(2026, 10, 12), date(2026, 11, 2)]      # 每月第一個交易日
+    assert fundamental_calls(sources.tpex, "valuation") == [date(2026, 10, 12), date(2026, 11, 2)]
+    assert fundamental_calls(sources.twse, "shares") == [date(2026, 10, 12), date(2026, 11, 2)]
+    assert fundamental_calls(sources.tpex, "shares") == []              # 上櫃的發行股數取自已存檔的每日行情
+    assert summary.valuations > 0 and summary.shares > 0
+    with SqliteMarketStore(tmp_path / "market.db") as store:
+        valuations = store.valuation_frame()
+        assert {"2330", "1101", "6488"} <= set(valuations["code"]) and "0050" not in set(valuations["code"])
+        shares = store.shares_frame()
+        assert set(shares["market"]) == {"tse", "otc"}
+        assert shares.loc[shares["code"] == "2330", "shares"].iloc[0] == 25932370067
+
+
+def test_revenue_is_fetched_after_the_deadline_for_all_four_pages(tmp_path: Path) -> None:
+    sources = make_sources([OCT_12, OCT_13])
+
+    run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 14))
+
+    # 9 月營收：10/10 之後才抓（今天 10/14），國內與外國公司 × 上市與上櫃；10 月還不能抓
+    assert sorted(sources.mops.calls, key=str) == sorted(
+        [(market, date(2026, 9, 1), foreign) for market in Market for foreign in (False, True)], key=str)
+    with SqliteMarketStore(tmp_path / "market.db") as store:
+        rows = store.revenue_frame()
+    assert set(rows["month"]) == {"2026-09-01"}
+    assert "2330" not in set(rows["code"]) and "1101" in set(rows["code"])
+    assert set(rows["industry"]) == {"水泥工業", "食品工業"}
+
+
+def test_revenue_is_fetched_again_until_settled_then_not_at_all(tmp_path: Path) -> None:
+    sources = make_sources([OCT_12, OCT_13])
+    run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 14))
+    assert len(sources.mops.calls) == 4
+
+    run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 15))     # 10/15 尚未超過 10/10 + 5 天
+    assert len(sources.mops.calls) == 8
+
+    run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 16))
+    assert len(sources.mops.calls) == 12                                           # 10/15 抓到的還不算完成
+
+    run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 17))
+    assert len(sources.mops.calls) == 12
+
+
+def test_samples_are_not_fetched_again(tmp_path: Path) -> None:
+    sources = make_sources([OCT_12, OCT_13])
+    run(tmp_path, sources, OCT_12, OCT_13, today=date(2026, 10, 14))
+    assert fundamental_calls(sources.twse, "valuation") == [OCT_12]
+
+    run(tmp_path, sources, OCT_12, OCT_13, today=date(2026, 10, 20))
+
+    assert fundamental_calls(sources.twse, "valuation") == [OCT_12]
+
+
+def test_otc_shares_fall_back_to_a_request_when_not_archived(tmp_path: Path) -> None:
+    sources = make_sources([OCT_12, OCT_13])
+    run(tmp_path, sources, OCT_12, OCT_13, today=OCT_13 + (date(2026, 10, 14) - OCT_13))
+    with SqliteMarketStore(tmp_path / "market.db") as store:
+        store._conn.execute("DELETE FROM fetch_log WHERE source = 'otc_shares'")     # 模擬尚未解析發行股數的回應
+        store._conn.commit()
+    (tmp_path / "raw" / "otc_daily" / "2026" / "20261012.json.gz").unlink()
+    before = len([c for c in sources.tpex.calls if c[0] == "daily"])
+
+    run(tmp_path, sources, OCT_12, OCT_13, today=date(2026, 10, 15))
+
+    assert len([c for c in sources.tpex.calls if c[0] == "daily"]) == before + 1
+
+
+def test_a_failed_page_can_be_resumed(tmp_path: Path) -> None:
+    sources = make_sources([OCT_12, OCT_13])
+    calls = {"n": 0}
+    original = sources.mops.revenue_page
+
+    def flaky(market: Market, month: date, *, foreign: bool) -> bytes:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise DataSourceError("HTTP 503")
+        return original(market, month, foreign=foreign)
+
+    sources.mops.revenue_page = flaky
+    with pytest.raises(JobFailed, match="已完成 1/"):
+        run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 20))
+
+    run(tmp_path, sources, date(2026, 9, 1), OCT_13, today=date(2026, 10, 20))
+
+    assert len(sources.mops.calls) == 4         # 第一份已完成，不重抓；之後從中斷處繼續

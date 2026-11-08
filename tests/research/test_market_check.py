@@ -159,3 +159,33 @@ def test_market_check_job_prints_report_and_writes_details(tmp_path: Path) -> No
     assert "■ 發行量加權股價報酬指數" in text and "■ 轉上市與新掛牌" in text
     assert not (tmp_path / "check" / "stale.csv").exists()
     assert CONFIG.settings.db_path != config.settings.db_path                    # 讀的是暫存的 screener.db
+
+
+def test_fundamentals_check_reports_coverage_and_anomalies() -> None:
+    revenue = pd.DataFrame([
+        {"code": "1101", "month": "2026-09-01", "industry": "水泥工業", "revenue": 100.0, "cumulative": 1000.0},
+        {"code": "1102", "month": "2026-09-01", "industry": "水泥工業", "revenue": -5.0, "cumulative": 50.0},
+        {"code": "1101", "month": "2026-10-01", "industry": "水泥工業", "revenue": 200.0, "cumulative": 100.0},
+    ])
+    valuations = pd.DataFrame([{"code": "1101", "date": "2026-09-01", "pe": 10.0, "pb": 1.0},
+                               {"code": "1102", "date": "2026-09-01", "pe": None, "pb": -1.0}])
+    shares = pd.DataFrame([{"code": "1101", "date": "2026-09-01", "shares": 1_000_000},
+                           {"code": "1102", "date": "2026-09-01", "shares": 0}])
+    quotes = frame([row("1101", "2026-09-01", 50.0), row("1102", "2026-09-01", 20.0)])
+
+    section = check.check_fundamentals(revenue, valuations, shares, quotes)
+
+    text = "\n".join(section.lines)
+    assert "月營收 3 筆，2 個月（2026-09～2026-10）" in text
+    assert "當月營收為負 1 筆；累計營收小於當月營收 1 筆" in text
+    assert "本益比沒有值（虧損）1 筆" in text and "淨值比不是正數 1 筆" in text
+    assert "發行股數 2 筆" in text and "不是正數 1 筆" in text
+    assert len(section.tables["revenue_anomalies"]) == 2
+
+
+def test_fundamentals_check_without_data() -> None:
+    empty = pd.DataFrame()
+
+    section = check.check_fundamentals(empty, empty, empty, frame([]))
+
+    assert section.lines == ["還沒有基本面資料（market-update 會自動補上）"]

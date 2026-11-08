@@ -183,6 +183,32 @@ class MarketConfig:
     output_dir: Path                # backtest、trade-backtest --universe market 的輸出
     check_dir: Path                 # market-check 的明細
     exchange: RequestSettings       # 證交所、櫃買中心的請求，兩邊各自計算間隔
+    mops: RequestSettings           # 公開資訊觀測站的請求（月營收，RESEARCH_PLAN.md 4.4）
+    revenue_available_day: int      # M 月的營收在 M+1 月這一天之後的第一個交易日才能用（R26）
+    revenue_settle_days: int        # 上一個日子再過幾天視為公布完成，之前抓到的下次再抓
+
+
+@dataclass(frozen=True)
+class FactorDefinition:
+    """research.yaml 的一個因子：id 為報告上的名稱，kind 為程式註冊的計算方式，params 為它的參數。"""
+
+    id: str
+    kind: str
+    params: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class FactorsConfig:
+    """單因子研究（RESEARCH_PLAN.md 4.4、4.5）。"""
+
+    output_dir: Path
+    horizons: tuple[int, ...]       # 持有交易日數：完整列出 IC、分位數、換手
+    decay_horizons: tuple[int, ...]  # 只列 IC 的衰減
+    summary_horizon: int            # 終端摘要與單一天數圖表使用的持有天數
+    quantiles: int                  # 分成幾組
+    min_stocks: int                 # 當天有因子值的股票少於此數時不計算
+    min_industry_stocks: int        # 當天同產業的股票少於此數時併到「其他」再中性化
+    definitions: tuple[FactorDefinition, ...]
 
 
 @dataclass(frozen=True)
@@ -193,6 +219,7 @@ class ResearchConfig:
     isin: IsinSettings
     signal_report: SignalReportConfig
     market: MarketConfig
+    factors: FactorsConfig
 
 
 @dataclass(frozen=True)
@@ -441,7 +468,7 @@ def load_research_config(path: Path) -> ResearchConfig:
     """只有研究指令會載入，寫錯時不影響每日的掃描與更新（PROJECT_PLAN.md 10.4）。"""
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"events", "isin", "signal_report", "market"}, where)
+    check_keys(data, {"events", "isin", "signal_report", "market", "factors"}, where)
 
     events_where = f"{where} > events"
     events_data = get_field(data, "events", dict, where)
@@ -471,12 +498,42 @@ def load_research_config(path: Path) -> ResearchConfig:
     )
     require(signal_report.top_n >= 0, f"{report_where} > top_n：不可為負數")
     market = _parse_market(get_field(data, "market", dict, where), f"{where} > market")
-    return ResearchConfig(events=events, isin=isin, signal_report=signal_report, market=market)
+    factors = _parse_factors(get_field(data, "factors", dict, where), f"{where} > factors")
+    return ResearchConfig(events=events, isin=isin, signal_report=signal_report, market=market, factors=factors)
+
+
+def _parse_factors(data: Mapping[str, Any], where: str) -> FactorsConfig:
+    check_keys(data, {"output_dir", "horizons", "decay_horizons", "summary_horizon", "quantiles", "min_stocks",
+                      "min_industry_stocks", "definitions"}, where)
+    horizons = _parse_horizons(data, where)
+    decay = _parse_horizons({"horizons": get_field(data, "decay_horizons", list, where)}, f"{where} > decay_horizons")
+    summary_horizon = get_field(data, "summary_horizon", int, where)
+    require(summary_horizon in horizons, f"{where} > summary_horizon：必須在 horizons 之中")
+    quantiles = get_field(data, "quantiles", int, where)
+    require(quantiles >= 2, f"{where} > quantiles：至少 2 組")
+    min_stocks = get_field(data, "min_stocks", int, where)
+    require(min_stocks >= quantiles, f"{where} > min_stocks：不可少於 quantiles")
+    min_industry = get_field(data, "min_industry_stocks", int, where)
+    require(min_industry >= 1, f"{where} > min_industry_stocks：必須大於 0")
+    definitions = []
+    for i, item in enumerate(get_field(data, "definitions", list, where), start=1):
+        item_where = f"{where} > definitions 第 {i} 項"
+        require(isinstance(item, dict), f"{item_where}：應為物件")
+        check_keys(item, {"id", "kind", "params"}, item_where)
+        definitions.append(FactorDefinition(id=get_field(item, "id", str, item_where),
+                                            kind=get_field(item, "kind", str, item_where),
+                                            params=get_field(item, "params", dict, item_where)))
+    require(bool(definitions), f"{where} > definitions：至少要有一個因子")
+    ids = [d.id for d in definitions]
+    require(len(set(ids)) == len(ids), f"{where} > definitions：id 重複")
+    return FactorsConfig(output_dir=Path(get_field(data, "output_dir", str, where)), horizons=tuple(horizons),
+                         decay_horizons=tuple(decay), summary_horizon=summary_horizon, quantiles=quantiles,
+                         min_stocks=min_stocks, min_industry_stocks=min_industry, definitions=tuple(definitions))
 
 
 def _parse_market(data: Mapping[str, Any], where: str) -> MarketConfig:
     check_keys(data, {"db_path", "raw_dir", "start", "signal_start", "compare_start", "universe", "output_dir",
-                      "check_dir", "exchange"}, where)
+                      "check_dir", "exchange", "mops", "revenue_available_day", "revenue_settle_days"}, where)
     universe_where = f"{where} > universe"
     universe_data = get_field(data, "universe", dict, where)
     check_keys(universe_data, {"size", "lookback_days"}, universe_where)
@@ -488,6 +545,9 @@ def _parse_market(data: Mapping[str, Any], where: str) -> MarketConfig:
     exchange_where = f"{where} > exchange"
     exchange_data = get_field(data, "exchange", dict, where)
     check_keys(exchange_data, _REQUEST_KEYS, exchange_where)
+    mops_where = f"{where} > mops"
+    mops_data = get_field(data, "mops", dict, where)
+    check_keys(mops_data, _REQUEST_KEYS, mops_where)
     market = MarketConfig(
         db_path=Path(get_field(data, "db_path", str, where)),
         raw_dir=Path(get_field(data, "raw_dir", str, where)),
@@ -498,8 +558,13 @@ def _parse_market(data: Mapping[str, Any], where: str) -> MarketConfig:
         output_dir=Path(get_field(data, "output_dir", str, where)),
         check_dir=Path(get_field(data, "check_dir", str, where)),
         exchange=RequestSettings(**_parse_request_settings(exchange_data, exchange_where)),
+        mops=RequestSettings(**_parse_request_settings(mops_data, mops_where)),
+        revenue_available_day=get_field(data, "revenue_available_day", int, where),
+        revenue_settle_days=get_field(data, "revenue_settle_days", int, where),
     )
     require(market.signal_start >= market.start, f"{where} > signal_start：不可早於 start")
+    require(1 <= market.revenue_available_day <= 28, f"{where} > revenue_available_day：應在 1～28 之間")
+    require(market.revenue_settle_days >= 0, f"{where} > revenue_settle_days：不可為負數")
     require(market.compare_start >= market.signal_start, f"{where} > compare_start：不可早於 signal_start")
     return market
 

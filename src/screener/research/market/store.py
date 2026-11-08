@@ -13,7 +13,8 @@ from types import TracebackType
 import pandas as pd
 
 from screener.models import ActionKind, CorporateAction, DividendResult, Market
-from screener.research.market.models import CLOSED, OK, DailyQuotes, Delisting, FetchRecord, MarketQuote, Security
+from screener.research.market.models import (CLOSED, OK, DailyQuotes, Delisting, FetchRecord, MarketQuote,
+                                             MonthlyRevenue, Security, SharesOutstanding, Valuation)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS daily_quotes (
@@ -75,6 +76,35 @@ CREATE TABLE IF NOT EXISTS securities (             -- 由每日行情彙整，�
     first_date  TEXT NOT NULL,          -- 第一次出現在行情的日子
     last_date   TEXT NOT NULL,
     delisted_on TEXT                    -- FinMind 的下市日
+);
+CREATE TABLE IF NOT EXISTS monthly_revenue (        -- 公開資訊觀測站的月營收（千元）與當時的產業別（M9）
+    code                 TEXT NOT NULL,
+    month                TEXT NOT NULL,     -- 營收月份，YYYY-MM-01
+    market               TEXT NOT NULL,
+    name                 TEXT NOT NULL,
+    industry             TEXT NOT NULL,
+    revenue              INTEGER,
+    previous             INTEGER,
+    last_year            INTEGER,
+    cumulative           INTEGER,
+    cumulative_last_year INTEGER,
+    PRIMARY KEY (code, month)
+);
+CREATE TABLE IF NOT EXISTS valuations (             -- 每月第一個交易日的本益比、淨值比、殖利率（M9）
+    code            TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    market          TEXT NOT NULL,
+    pe              REAL,               -- 虧損時為 NULL
+    pb              REAL,
+    dividend_yield  REAL,               -- %
+    PRIMARY KEY (code, date)
+);
+CREATE TABLE IF NOT EXISTS shares_outstanding (     -- 每月第一個交易日的發行股數（M9）
+    code    TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    market  TEXT NOT NULL,
+    shares  INTEGER NOT NULL,
+    PRIMARY KEY (code, date)
 );
 CREATE TABLE IF NOT EXISTS fetch_log (              -- 抓取紀錄，供中斷後續跑
     source      TEXT NOT NULL,          -- tse_daily、otc_daily、tse_dividends …
@@ -150,6 +180,30 @@ class SqliteMarketStore:
         with self._conn:
             self._conn.executemany("INSERT OR REPLACE INTO return_index_monthly (date, value) VALUES (?, ?)",
                                    [(day.isoformat(), value) for day, value in values.items()])
+            self._log(record)
+
+    def record_revenues(self, record: FetchRecord, revenues: Sequence[MonthlyRevenue]) -> None:
+        with self._conn:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO monthly_revenue (code, month, market, name, industry, revenue, previous,"
+                " last_year, cumulative, cumulative_last_year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [(r.code, r.month.isoformat(), r.market.value, r.name, r.industry, r.revenue, r.previous, r.last_year,
+                  r.cumulative, r.cumulative_last_year) for r in revenues])
+            self._log(record)
+
+    def record_valuations(self, record: FetchRecord, valuations: Sequence[Valuation]) -> None:
+        with self._conn:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO valuations (code, date, market, pe, pb, dividend_yield)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                [(v.code, v.date.isoformat(), v.market.value, v.pe, v.pb, v.dividend_yield) for v in valuations])
+            self._log(record)
+
+    def record_shares(self, record: FetchRecord, shares: Sequence[SharesOutstanding]) -> None:
+        with self._conn:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO shares_outstanding (code, date, market, shares) VALUES (?, ?, ?, ?)",
+                [(s.code, s.date.isoformat(), s.market.value, s.shares) for s in shares])
             self._log(record)
 
     def record_calendar(self, days: Iterable[date]) -> None:
@@ -243,6 +297,17 @@ class SqliteMarketStore:
         if not chunks:
             return pd.DataFrame(columns=list(columns))
         return pd.concat(chunks, ignore_index=True)
+
+    def revenue_frame(self) -> pd.DataFrame:
+        """月營收與產業別；month 為字串 YYYY-MM-01。"""
+        return pd.read_sql_query("SELECT code, month, market, name, industry, revenue, previous, last_year, cumulative,"
+                                 " cumulative_last_year FROM monthly_revenue", self._conn)
+
+    def valuation_frame(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT code, date, market, pe, pb, dividend_yield FROM valuations", self._conn)
+
+    def shares_frame(self) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT code, date, market, shares FROM shares_outstanding", self._conn)
 
     def dividend_results(self, code: str | None = None) -> list[tuple[DividendResult, Market]]:
         sql = "SELECT code, date, before_price, after_price, market FROM dividend_results"

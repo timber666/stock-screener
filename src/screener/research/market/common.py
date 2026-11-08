@@ -33,11 +33,16 @@ def is_common_stock(code: str) -> bool:
 
 
 def number(text: str) -> float | None:
-    """'1,234.50' → 1234.5；沒有值（"--"、"----"、空白）時為 None。"""
+    """'1,234.50' → 1234.5；沒有值（"--"、"----"、空白、"N/A"、"null"）時為 None。"""
     cleaned = text.replace(",", "").replace(" ", "").strip()
-    if not cleaned or set(cleaned) == {"-"}:
+    if not cleaned or set(cleaned) == {"-"} or cleaned.lower() in ("n/a", "null"):
         return None
     return float(cleaned)
+
+
+def cell_number(value: Any) -> float | None:
+    """JSON 的儲存格：可能是字串、數字或 null（2026-11-08 實測，櫃買中心的本益比表）。"""
+    return None if value is None else number(str(value))
 
 
 def count(text: str) -> int:

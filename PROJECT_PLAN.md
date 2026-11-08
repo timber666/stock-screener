@@ -1,6 +1,6 @@
 # 台股技術面盤中選股系統：專案規劃書
 
-> 版本：v0.30（2026-11-07）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 全市場資料完成，見 `RESEARCH_PLAN.md` 4.3）
+> 版本：v0.31（2026-11-08）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 全市場資料完成，見 `RESEARCH_PLAN.md` 4.3；M9 單因子研究完成，見 `RESEARCH_PLAN.md` 4.4、4.5）
 >
 > 本文件是每日選股系統與共用部分的單一事實來源；研究功能（M7 起）的規劃在 `RESEARCH_PLAN.md`，兩者的邊界見 10.4。實作前請完整閱讀。標記「⚠️ 待確認」的項目是使用者尚未拍板的決定：請採用文中預設值，並保持可在設定檔調整，不要自行改變規則語意。已拍板的決定記錄在第 15 節，不需要再次詢問。
 
@@ -503,7 +503,7 @@ discord:                     # 欄位同 finmind；被限流（HTTP 429）時改
   request_interval_sec: 1    # 多則訊息之間的間隔
 ```
 
-連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有 `backtest`、`trade-backtest` 指令會讀取，欄位見 14.1 與 `RESEARCH_PLAN.md` 4.2；`research.yaml` 只有研究指令會讀取（`events`、`signal-report`、`market-update`、`market-check`，以及 `--universe market` 的回測），見 9.5。
+連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有 `backtest`、`trade-backtest` 指令會讀取，欄位見 14.1 與 `RESEARCH_PLAN.md` 4.2；`research.yaml` 只有研究指令會讀取（`events`、`signal-report`、`market-update`、`market-check`、`factor-report`，以及 `--universe market` 的回測），見 9.5。
 
 ### 9.4 `.env`（不進版控，另提供 `.env.example`）
 
@@ -540,6 +540,18 @@ market:                         # 全市場資料（M8，RESEARCH_PLAN.md 4.3）
   output_dir: data/backtest/market
   check_dir: data/research/market_check
   exchange: { timeout_sec: 30, retry: 3, retry_backoff_sec: 30, request_interval_sec: 5 }  # 兩邊各自計算間隔
+  mops: { timeout_sec: 30, retry: 3, retry_backoff_sec: 30, request_interval_sec: 5 }      # 公開資訊觀測站（M9）
+  revenue_available_day: 10     # M 月營收在 M+1 月這一天之後的第一個交易日才能用（RESEARCH_PLAN.md R26）
+  revenue_settle_days: 5        # 上一個日子再過幾天視為公布完成
+factors:                        # 單因子研究（RESEARCH_PLAN.md 4.4、4.5）：持有天數、分組數、輸出位置與因子清單
+  output_dir: data/research/factors
+  horizons: [1, 5, 20]
+  decay_horizons: [1, 2, 3, 5, 10, 20]
+  summary_horizon: 5
+  quantiles: 5
+  min_stocks: 100
+  min_industry_stocks: 5
+  definitions: [...]            # id、kind（程式註冊的計算方式）、params
 ```
 
 FinMind 與 Discord 的請求設定沿用 `settings.yaml`。M7 之前 `isin`、`events` 與 `finmind.dividend_lookahead_days` 放在 `settings.yaml`（D44 修正）。
@@ -656,7 +668,7 @@ class ExitRule(Rule):          # 出場規則（5.4）：只用於交易回測
 
 | 項目 | 每日系統 | 研究功能 |
 |---|---|---|
-| 指令 | `update`、`scan`（排程執行）、`analyze` | `events`、`backtest`、`trade-backtest`、`signal-report`（M7）、`market-update`、`market-check`（M8），以及之後的研究指令 |
+| 指令 | `update`、`scan`（排程執行）、`analyze` | `events`、`backtest`、`trade-backtest`、`signal-report`（M7）、`market-update`、`market-check`（M8）、`factor-report`（M9），以及之後的研究指令 |
 | 程式 | `jobs/daily_update.py`、`jobs/intraday_scan.py`、`jobs/analyze.py` | `backtest/`、`research/`（M7 起）、`jobs/` 中研究指令的程式 |
 | 資料 | `data/screener.db`：觀察清單的日 K（`update` 寫入）、訊號紀錄（M7，`scan` 寫入，8.3）；`data/snapshots/`（MIS 原始資料，`scan` 寫入） | 讀取 `screener.db`；除權息與公司行動由 `events` 寫入 `screener.db`；全市場資料存在 `data/market.db`，輸出在 `data/backtest/`、`data/research/` |
 | 設定 | `settings.yaml`、`watchlist.yaml`、`rules.yaml` | `backtest.yaml`、`research.yaml` |
@@ -785,7 +797,11 @@ stock-screener/
 │   │   ├── signal_report.py   # 訊號成績單的計算：一致性、報酬、基準、除權息調整
 │   │   ├── signal_report_output.py  # 成績單的 Discord 訊息與明細 CSV
 │   │   ├── universe.py        # 全市場的動態股票池（M8）
-│   │   └── market/            # 全市場資料（M8）：證交所、櫃買中心的請求與解析、market.db、品質檢查、與觀察清單並列
+│   │   ├── factor_eval.py     # 單因子評估（M9）：Rank IC、分位數、換手、產業中性
+│   │   ├── factor_study.py    # 把因子跑過評估，整理成表格
+│   │   ├── factor_output.py   # 因子報告：終端摘要、CSV、Plotly 報表
+│   │   ├── factors/           # 因子定義（M9）：寬表、註冊表、價量、規則分數、趨勢、基本面
+│   │   └── market/            # 全市場資料（M8）：證交所、櫃買中心、公開資訊觀測站的請求與解析、market.db、品質檢查、與觀察清單並列
 │   └── jobs/
 │       ├── daily_update.py
 │       ├── corporate_events.py  # 抓取除權息與公司行動、對照官方參考價
@@ -795,6 +811,7 @@ stock-screener/
 │       ├── signal_report.py   # 訊號成績單（研究頻道）
 │       ├── market_update.py   # 全市場資料的回補與更新（M8）
 │       ├── market_check.py    # 全市場資料的品質報告（M8）
+│       ├── factor_report.py   # 單因子研究（M9）
 │       └── analyze.py         # 工具指令：輸出轉折點與趨勢
 ├── scripts/
 │   └── register_tasks.ps1     # 在 Windows 工作排程器註冊 scan、update、weekly、market（第 14 節）
@@ -833,6 +850,8 @@ python -m screener market-update                       # 全市場資料：補�
 python -m screener market-check                        # 全市場資料的品質報告
 python -m screener backtest --universe market          # 以全市場股票池回測，並與觀察清單並列
 python -m screener trade-backtest --universe market
+python -m screener factor-report                       # 單因子研究（RESEARCH_PLAN.md 4.4、4.5）
+python -m screener factor-report --factors ep,mom_12_1 # 只跑指定的因子
 ```
 
 `--replay` 與 `--dry-run` 是獨立旗標。回放模式以資料庫中該日（含）以前的日 K 建立 StockContext，該日 K 棒視為「今日」（`is_tentative = false`）；不呼叫 MIS，因此不做交易日與一致性檢查。未加 `--dry-run` 時照常推播，標題標示「回放」（第 11 節）。
@@ -863,7 +882,7 @@ python -m screener trade-backtest --universe market
 | M4 | 盤中資料：MIS 抓取、暫定 K 棒、交易日與一致性檢查 | 盤中 `screener scan --dry-run` 正確輸出 | 完成（2026-11-03） |
 | M5 | Discord 推播、錯誤通知、排程設定範例（以 Windows 工作排程器為主；執行時電腦須開機） | 交易日 13:10 自動收到訊息 | 完成（2026-11-02） |
 | M6 | 訊號回測：回補 2020-06 起的日 K、除權息與公司行動資料、還原價、歷史訊號的報酬統計（14.1） | `screener backtest` 輸出各規則的統計，並手算數例供使用者對照 | 完成（2026-11-01） |
-| M7–M11 | 研究功能：訊號紀錄與追蹤、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股 | 見 `RESEARCH_PLAN.md` 第 4 節 | M7 完成（2026-11-07，`RESEARCH_PLAN.md` 4.1）；M8 完成（2026-11-08，4.3）；M9 起未規劃 |
+| M7–M11 | 研究功能：訊號紀錄與追蹤、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股 | 見 `RESEARCH_PLAN.md` 第 4 節 | M7 完成（2026-11-07，`RESEARCH_PLAN.md` 4.1）；M8 完成（2026-11-08，4.3）；M9 完成（2026-11-08，4.4、4.5）；M10 起未規劃 |
 | — | 交易回測：模擬 5.4、5.5 的進出場，含挑選與部位上限 | 見 `RESEARCH_PLAN.md` 4.2 | 完成（2026-11-07，D56） |
 
 M4、M5 的驗證：
@@ -1056,6 +1075,7 @@ M4、M5 的驗證：
 
 ## 16. 變更紀錄
 
+- v0.31（2026-11-08）：M9 單因子研究（`RESEARCH_PLAN.md` 4.4、4.5、R17–R29）：新增研究指令 `factor-report`（10.4、第 12 節）；`research.yaml` 的 `market` 新增 `mops`、`revenue_available_day`、`revenue_settle_days`，新增 `factors` 區塊（9.5）；`market-update` 併入月營收、本益比與發行股數的抓取。每日的 `scan`、`update` 與推播內容都沒有改變。
 - v0.30（2026-11-08）：M8 全市場資料（`RESEARCH_PLAN.md` 4.3、R11–R16）：新增研究指令 `market-update`、`market-check` 與 `backtest`、`trade-backtest` 的 `--universe market`（10.4、第 12 節）；`research.yaml` 新增 `market` 區塊（9.3、9.5）；排程新增 `stock-screener-market`（第 14 節）。每日的 `scan`、`update` 與推播內容都沒有改變。
 - v0.29（2026-11-07）：新增 D56：交易回測（`trade-backtest`，`RESEARCH_PLAN.md` 4.2）與出場規則 `below_ma_exit`、`max_hold_exit`（5.4、9.2、10.1、10.2），出場規則不列入規則檔指紋；`backtest.yaml` 新增 `trade` 區塊（9.3）；第 0、2、12、14 節與 10.4 的指令同步修改。每日的 `scan`、`update`、推播內容與訊號都沒有改變。
 - v0.28（2026-11-07）：新增 D55：空方的進出場先不做，專案先以多方為主（5.5）；測試結果見 `RESEARCH_PLAN.md` 第 8 節。規則、訊號與推播內容都沒有改變。

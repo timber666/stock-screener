@@ -30,3 +30,51 @@ market:                         # 全市場資料（RESEARCH_PLAN.md 4.3）：ma
     retry: 3
     retry_backoff_sec: 30       # 第 n 次重試前等待 n × 此秒數
     request_interval_sec: 5
+  mops:                         # 公開資訊觀測站（月營收與產業別，RESEARCH_PLAN.md 4.4）；頻率限制沒有公開
+    timeout_sec: 30
+    retry: 3
+    retry_backoff_sec: 30
+    request_interval_sec: 5
+  revenue_available_day: 10     # M 月的營收在 M+1 月這一天之後的第一個交易日才能用（法定期限，R26）
+  revenue_settle_days: 5        # 上一個日子再過幾天視為公布完成；之前抓到的下次再抓
+factors:                        # 單因子研究：python -m screener factor-report（RESEARCH_PLAN.md 4.4、4.5）
+  output_dir: data/research/factors   # summary.csv、ic.csv、groups.csv、report.html（不進版控）
+  horizons: [1, 5, 20]          # 持有交易日數：完整列出 IC、分位數、換手（R17）
+  decay_horizons: [1, 2, 3, 5, 10, 20]  # 只列 IC 的衰減（R17）
+  summary_horizon: 5            # 終端摘要與單一天數圖表使用的持有天數
+  quantiles: 5                  # 每天分成幾組（R19）
+  min_stocks: 100               # 當天有因子值的股票少於此數時不計算
+  min_industry_stocks: 5        # 當天同產業的股票少於此數時併到「其他」再中性化
+  definitions:                  # kind 為程式註冊的計算方式（research/factors/），params 為它的參數
+    # 動能
+    - { id: mom_12_1, kind: momentum, params: { lookback: 250, skip: 20 } }
+    - { id: mom_6_1, kind: momentum, params: { lookback: 120, skip: 20 } }
+    # 短期反轉
+    - { id: ret_5, kind: past_return, params: { days: 5 } }
+    - { id: ret_20, kind: past_return, params: { days: 20 } }
+    # 波動
+    - { id: vol_60, kind: volatility, params: { days: 60 } }
+    - { id: max_20, kind: max_daily_return, params: { days: 20 } }
+    # 流動性
+    - { id: adv_60, kind: average_value, params: { days: 60 } }
+    - { id: value_surge, kind: value_surge, params: { short: 5, long: 60 } }
+    # 現有規則改成分數
+    - { id: ma20_gap, kind: ma_gap, params: { ma: 20 } }
+    - { id: ma5_gap, kind: ma_gap, params: { ma: 5 } }
+    - { id: vol_ratio, kind: volume_ratio, params: {} }
+    - { id: body, kind: candle_body, params: {} }
+    - { id: high_gap_40, kind: high_gap, params: { days: 40 } }
+    - { id: low_gap_40, kind: low_gap, params: { days: 40 } }
+    - { id: ma_spread, kind: ma_spread, params: { short: 5, long: 20 } }
+    - { id: trend, kind: trend, params: {} }
+    # 基本面（M9b）
+    - { id: rev_yoy, kind: revenue_yoy, params: {} }
+    - { id: rev_mom, kind: revenue_mom, params: {} }
+    - { id: rev_cum_yoy, kind: revenue_cum_yoy, params: {} }
+    - { id: rev_accel, kind: revenue_acceleration, params: { months: 3 } }
+    - { id: ep, kind: earnings_yield, params: {} }
+    - { id: profitable, kind: profitable, params: {} }
+    - { id: bp, kind: book_yield, params: {} }
+    - { id: dy, kind: dividend_yield, params: {} }
+    - { id: size, kind: size, params: {} }
+    - { id: turnover_60, kind: share_turnover, params: { days: 60 } }

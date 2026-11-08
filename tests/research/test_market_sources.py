@@ -11,7 +11,7 @@ from conftest import FIXTURES_DIR, FakeResponse, FakeSession, FakeTime
 from screener.config import RequestSettings
 from screener.data.base import DataSourceError
 from screener.models import ActionKind, CorporateAction, DividendResult, Market
-from screener.research.market import tpex, twse
+from screener.research.market import mops, tpex, twse
 from screener.research.market.common import is_common_stock, number, roc_date, to_roc
 
 MARKET_FIXTURES = FIXTURES_DIR / "market"
@@ -34,7 +34,7 @@ def test_common_stock_rule(code: str, expected: bool) -> None:
 
 
 @pytest.mark.parametrize("text, expected", [("1,234.50", 1234.5), ("-0.53 ", -0.53), ("+ 14.00", 14.0),
-                                            ("--", None), ("----", None), ("", None), ("0.00", 0.0)])
+                                            ("--", None), ("----", None), ("", None), ("0.00", 0.0), ("N/A", None), ("null", None)])
 def test_number(text: str, expected: float | None) -> None:
     assert number(text) == expected
 
@@ -265,4 +265,112 @@ def test_tpex_requests() -> None:
          {"l": "zh-tw", "d": "115/10/01", "ed": "115/10/31", "o": "json"}),
         ("https://www.tpex.org.tw/www/zh-tw/bulletin/revivt",
          {"startDate": "2026/01/01", "endDate": "2026/12/31", "response": "json"}),
+    ]
+
+
+# --- 基本面（M9，RESEARCH_PLAN.md 4.4、4.5）------------------------------------------
+
+MOPS_PAGE = (MARKET_FIXTURES / "mops_revenue_sii.html").read_bytes()
+
+
+def test_mops_parses_industries_and_excludes_totals_and_dr() -> None:
+    rows = mops.parse_revenue(MOPS_PAGE, date(2026, 9, 1), Market.TSE, "測試")
+
+    by_code = {r.code: r for r in rows}
+    assert "9103" not in by_code                # 存託憑證
+    assert {r.code: r.industry for r in rows} == {"1101": "水泥工業", "1102": "水泥工業", "1201": "食品工業",
+                                                  "1203": "食品工業"}
+    taiwan_cement = by_code["1101"]
+    assert (taiwan_cement.revenue, taiwan_cement.previous, taiwan_cement.last_year) == (14321556, 13515534, 13306676)
+    assert (taiwan_cement.cumulative, taiwan_cement.cumulative_last_year) == (113048525, 109438297)
+    assert taiwan_cement.name == "台泥" and taiwan_cement.market is Market.TSE and taiwan_cement.month == date(2026, 9, 1)
+    assert by_code["1102"].revenue is None      # 空白
+
+
+def test_mops_rejects_a_page_without_a_header() -> None:
+    with pytest.raises(DataSourceError, match="找不到欄位列"):
+        mops.parse_revenue("<html>查無資料</html>".encode("cp950"), date(2026, 9, 1), Market.TSE, "測試")
+
+
+def test_mops_rejects_a_header_without_expected_fields() -> None:
+    page = MOPS_PAGE.replace("當月營收".encode("cp950"), "本月營收".encode("cp950"))
+    with pytest.raises(DataSourceError, match="當月營收"):
+        mops.parse_revenue(page, date(2026, 9, 1), Market.TSE, "測試")
+
+
+def test_mops_requests() -> None:
+    time = FakeTime()
+    session = FakeSession(FakeResponse(status_code=200), FakeResponse(status_code=200))
+    client = mops.MopsClient(SETTINGS, session=session, sleep=time.sleep, clock=time.clock)
+
+    client.revenue_page(Market.TSE, date(2026, 9, 1), foreign=False)
+    client.revenue_page(Market.OTC, date(2015, 1, 1), foreign=True)
+
+    assert [c["url"] for c in session.calls] == [
+        "https://mopsov.twse.com.tw/nas/t21/sii/t21sc03_115_9_0.html",
+        "https://mopsov.twse.com.tw/nas/t21/otc/t21sc03_104_1_1.html",
+    ]
+    assert time.sleeps == [5]
+
+
+def test_mops_error_status_fails_and_server_error_retries() -> None:
+    time = FakeTime()
+    session = FakeSession(FakeResponse(status_code=403))
+    client = mops.MopsClient(SETTINGS, session=session, sleep=time.sleep, clock=time.clock)
+    with pytest.raises(DataSourceError, match="拒絕請求"):
+        client.revenue_page(Market.TSE, date(2026, 9, 1), foreign=False)
+
+    session = FakeSession(FakeResponse(status_code=500), FakeResponse(status_code=200))
+    client = mops.MopsClient(SETTINGS, session=session, sleep=time.sleep, clock=time.clock)
+    client.revenue_page(Market.TSE, date(2026, 9, 1), foreign=False)
+    assert len(session.calls) == 2
+
+
+def test_twse_valuation_formats() -> None:
+    new = {v.code: v for v in twse.parse_valuation(fixture("twse_valuation_20261106"), date(2026, 11, 6))}
+    assert sorted(new) == ["1101", "1102", "2330"]      # 不含 ETF
+    assert new["1101"].pe is None                       # 虧損的本益比是 `-`
+    assert (new["2330"].pe, new["2330"].pb, new["2330"].dividend_yield) == (24.75, 8.61, 1.03)
+    assert new["2330"].market is Market.TSE
+    old = {v.code: v for v in twse.parse_valuation(fixture("twse_valuation_20150105"), date(2015, 1, 5))}
+    assert (old["2330"].pe, old["2330"].pb, old["2330"].dividend_yield) == (15.82, 3.78, 2.14)
+
+
+def test_twse_valuation_without_data_is_an_error() -> None:
+    with pytest.raises(DataSourceError, match="查無資料"):
+        twse.parse_valuation({"stat": "很抱歉，沒有符合條件的資料!"}, date(2026, 11, 7))
+
+
+def test_tpex_valuation_formats_and_na() -> None:
+    new = {v.code: v for v in tpex.parse_valuation(fixture("tpex_valuation_20261106"), date(2026, 11, 6))}
+    assert (new["6488"].pe, new["6488"].pb, new["6488"].dividend_yield) == (28.83, 1.85, 1.5)
+    assert new["1569"].pe is None                       # N/A
+    assert new["1569"].market is Market.OTC
+    old = {v.code: v for v in tpex.parse_valuation(fixture("tpex_valuation_20150105"), date(2015, 1, 5))}
+    assert old["1256"].pe == 21.39
+
+
+def test_shares_parsing() -> None:
+    tse = {s.code: s for s in twse.parse_shares(fixture("twse_shares_20261106"), date(2026, 11, 6))}
+    assert sorted(tse) == ["1101", "2330"] and tse["2330"].shares == 25932370067
+    otc = {s.code: s for s in tpex.parse_shares(fixture("tpex_daily_20150105"), date(2015, 1, 5))}
+    assert otc and all(s.shares > 0 and s.market is Market.OTC for s in otc.values())
+
+
+def test_valuation_and_shares_requests() -> None:
+    time = FakeTime()
+    session = FakeSession(*[FakeResponse(body={"stat": "OK"}) for _ in range(3)])
+    tse = twse.TwseClient(SETTINGS, session=session, sleep=time.sleep, clock=time.clock)
+    tse.valuation(date(2026, 11, 6))
+    tse.shares(date(2026, 11, 6))
+    otc = tpex.TpexClient(SETTINGS, session=session, sleep=time.sleep, clock=time.clock)
+    otc.valuation(date(2026, 11, 6))
+
+    assert [(c["url"], c["params"]) for c in session.calls] == [
+        ("https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU_d",
+         {"date": "20261106", "selectType": "ALL", "response": "json"}),
+        ("https://www.twse.com.tw/rwd/zh/fund/MI_QFIIS",
+         {"date": "20261106", "selectType": "ALLBUT0999", "response": "json"}),
+        ("https://www.tpex.org.tw/web/stock/aftertrading/peratio_analysis/pera_result.php",
+         {"l": "zh-tw", "d": "115/11/06", "o": "json"}),
     ]

@@ -23,9 +23,9 @@ from screener.config import RequestSettings
 from screener.data.base import DataSourceError
 from screener.http import HttpClient
 from screener.models import ActionKind, CorporateAction, DividendResult, Market
-from screener.research.market.common import (count, field_positions, is_common_stock, json_reader, number,
+from screener.research.market.common import (cell_number, count, field_positions, is_common_stock, json_reader, number,
                                              positive_pair, roc_date, rows_of, to_roc)
-from screener.research.market.models import DailyQuotes, MarketQuote
+from screener.research.market.models import DailyQuotes, MarketQuote, SharesOutstanding, Valuation
 
 BASE_URL = "https://www.tpex.org.tw"
 QUOTE_TITLE = "上櫃股票每日收盤行情"
@@ -55,6 +55,10 @@ class TpexClient:
         return self._get("www/zh-tw/bulletin/revivt",
                          {"startDate": f"{start:%Y/%m/%d}", "endDate": f"{end:%Y/%m/%d}", "response": "json"},
                          f"櫃買中心減資 {start}～{end}")
+
+    def valuation(self, day: date) -> Any:
+        return self._get("web/stock/aftertrading/peratio_analysis/pera_result.php",
+                         {"l": "zh-tw", "d": to_roc(day), "o": "json"}, f"櫃買中心本益比 {day}")
 
     def _get(self, path: str, params: Mapping[str, str], label: str) -> Any:
         return self._http.get(f"{BASE_URL}/{path}", params, json_reader(label), label=label)
@@ -111,6 +115,28 @@ def _quote(row: list[str], at: Mapping[str, int], day: date) -> MarketQuote:
         change=change, flag=flag,
         next_limit_up=number(row[at["次日漲停價"]]), next_limit_down=number(row[at["次日跌停價"]]),
     )
+
+
+def parse_valuation(body: Any, day: date) -> list[Valuation]:
+    """本益比、殖利率、股價淨值比。公司名稱後面補空白；2015 年沒有「財報年/季」，以名稱對應。"""
+    where = f"櫃買中心本益比 {day}"
+    table = first_table(body, where)
+    rows = rows_of(table, where)
+    if not rows:
+        raise DataSourceError(f"{where} 查無資料（交易日應該要有）")
+    at = field_positions(table.get("fields") or [], ("股票代號", "本益比", "殖利率(%)", "股價淨值比"), where)
+    return [Valuation(row[at["股票代號"]].strip(), day, Market.OTC, cell_number(row[at["本益比"]]),
+                      cell_number(row[at["股價淨值比"]]), cell_number(row[at["殖利率(%)"]]))
+            for row in rows if is_common_stock(row[at["股票代號"]].strip())]
+
+
+def parse_shares(body: Any, day: date) -> list[SharesOutstanding]:
+    """每日行情的「發行股數」欄（上櫃的發行股數沒有另外的表）。"""
+    where = f"櫃買中心每日行情 {day}"
+    table = first_table(body, where)
+    at = field_positions(table.get("fields") or [], ("代號", "發行股數"), where)
+    return [SharesOutstanding(row[at["代號"]].strip(), day, Market.OTC, count(str(row[at["發行股數"]] or "")))
+            for row in rows_of(table, where) if is_common_stock(row[at["代號"]].strip())]
 
 
 def parse_dividend_results(body: Any, where: str) -> list[DividendResult]:

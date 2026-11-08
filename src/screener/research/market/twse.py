@@ -22,9 +22,9 @@ from screener.config import RequestSettings
 from screener.data.base import DataSourceError
 from screener.http import HttpClient
 from screener.models import ActionKind, CorporateAction, DividendResult, Market
-from screener.research.market.common import (count, field_positions, is_common_stock, json_reader, number,
+from screener.research.market.common import (cell_number, count, field_positions, is_common_stock, json_reader, number,
                                              positive_pair, roc_date, rows_of)
-from screener.research.market.models import DailyQuotes, MarketQuote
+from screener.research.market.models import DailyQuotes, MarketQuote, SharesOutstanding, Valuation
 
 BASE_URL = "https://www.twse.com.tw/rwd/zh"
 NO_DATA = "沒有符合條件的資料"
@@ -60,6 +60,14 @@ class TwseClient:
 
     def return_index(self, month: date) -> Any:
         return self._get("TAIEX/MFI94U", {"date": f"{month:%Y%m}01"}, f"證交所報酬指數月表 {month:%Y-%m}")
+
+    def valuation(self, day: date) -> Any:
+        return self._get("afterTrading/BWIBBU_d", {"date": f"{day:%Y%m%d}", "selectType": "ALL"},
+                         f"證交所本益比 {day}")
+
+    def shares(self, day: date) -> Any:
+        return self._get("fund/MI_QFIIS", {"date": f"{day:%Y%m%d}", "selectType": "ALLBUT0999"},
+                         f"證交所發行股數 {day}")
 
     def _get(self, path: str, params: Mapping[str, str], label: str) -> Any:
         return self._http.get(f"{BASE_URL}/{path}", {**params, "response": "json"}, json_reader(label), label=label)
@@ -134,6 +142,27 @@ def _return_index(tables: list[dict[str, Any]]) -> float | None:
             if row and row[0].strip() in RETURN_INDEX_NAMES:
                 return number(row[1])
     return None
+
+
+def parse_valuation(body: Any, day: date) -> list[Valuation]:
+    """BWIBBU_d：本益比、殖利率、股價淨值比。2015 年的回應欄位較少，以名稱對應。虧損的本益比是 `-`。"""
+    where = f"證交所本益比 {day}"
+    if not has_data(body, where):
+        raise DataSourceError(f"{where} 查無資料（交易日應該要有）")
+    at = field_positions(body.get("fields") or [], ("證券代號", "本益比", "殖利率(%)", "股價淨值比"), where)
+    return [Valuation(row[at["證券代號"]].strip(), day, Market.TSE, cell_number(row[at["本益比"]]),
+                      cell_number(row[at["股價淨值比"]]), cell_number(row[at["殖利率(%)"]]))
+            for row in rows_of(body, where) if is_common_stock(row[at["證券代號"]].strip())]
+
+
+def parse_shares(body: Any, day: date) -> list[SharesOutstanding]:
+    """MI_QFIIS 外資及陸資投資持股統計的發行股數。"""
+    where = f"證交所發行股數 {day}"
+    if not has_data(body, where):
+        raise DataSourceError(f"{where} 查無資料（交易日應該要有）")
+    at = field_positions(body.get("fields") or [], ("證券代號", "發行股數"), where)
+    return [SharesOutstanding(row[at["證券代號"]].strip(), day, Market.TSE, count(str(row[at["發行股數"]] or "")))
+            for row in rows_of(body, where) if is_common_stock(row[at["證券代號"]].strip())]
 
 
 def parse_dividend_results(body: Any, where: str) -> list[DividendResult]:

@@ -233,6 +233,12 @@ def test_repo_research_config_loads() -> None:
         Path("data/market.db"), date(2015, 1, 1), date(2015, 7, 1), date(2021, 1, 1))
     assert (market.universe.size, market.universe.lookback_days) == (500, 60)       # R7
     assert market.exchange.request_interval_sec == 5.0
+    assert market.mops.request_interval_sec == 5.0
+    assert (market.revenue_available_day, market.revenue_settle_days) == (10, 5)    # R26
+    factors = research.factors
+    assert (factors.horizons, factors.decay_horizons, factors.quantiles) == ((1, 5, 20), (1, 2, 3, 5, 10, 20), 5)
+    assert factors.summary_horizon == 5 and factors.output_dir == Path("data/research/factors")
+    assert {d.id for d in factors.definitions} >= {"mom_12_1", "ma5_gap", "trend", "rev_yoy", "ep"}
 
 
 @pytest.mark.parametrize(
@@ -252,6 +258,19 @@ def test_repo_research_config_loads() -> None:
         ("market", "universe", {"size": 500}, "market > universe：缺少必要欄位 `lookback_days`"),
         ("market", "exchange", {"timeout_sec": 30}, "market > exchange：缺少必要欄位"),
         ("market", "start", "2015-01-01x", "market > start：應為日期"),
+        ("market", "revenue_available_day", 0, "market > revenue_available_day：應在 1～28 之間"),
+        ("market", "revenue_settle_days", -1, "market > revenue_settle_days：不可為負數"),
+        ("market", "mops", {"timeout_sec": 30}, "market > mops：缺少必要欄位"),
+        ("factors", "horizons", [5, 1], "factors > horizons：應由小到大且不重複"),
+        ("factors", "decay_horizons", [], "decay_horizons > horizons：應為正整數陣列"),
+        ("factors", "summary_horizon", 2, "factors > summary_horizon：必須在 horizons 之中"),
+        ("factors", "quantiles", 1, "factors > quantiles：至少 2 組"),
+        ("factors", "min_stocks", 1, "factors > min_stocks：不可少於 quantiles"),
+        ("factors", "min_industry_stocks", 0, "factors > min_industry_stocks：必須大於 0"),
+        ("factors", "definitions", [], "factors > definitions：至少要有一個因子"),
+        ("factors", "definitions", [{"id": "a", "kind": "b"}], "definitions 第 1 項：缺少必要欄位 `params`"),
+        ("factors", "definitions", [{"id": "a", "kind": "b", "params": {}}, {"id": "a", "kind": "c", "params": {}}],
+         "factors > definitions：id 重複"),
     ],
 )
 def test_invalid_research_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,

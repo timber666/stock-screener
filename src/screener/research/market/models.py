@@ -57,6 +57,44 @@ class Delisting:
     name: str
 
 
+@dataclass(frozen=True)
+class MonthlyRevenue:
+    """公開資訊觀測站的月營收（千元），與當月所屬的產業別（RESEARCH_PLAN.md 4.4、R20）。"""
+
+    code: str
+    month: date                     # 營收月份的 1 日
+    market: Market
+    name: str
+    industry: str
+    revenue: int | None
+    previous: int | None            # 上月營收
+    last_year: int | None           # 去年當月營收
+    cumulative: int | None          # 當月累計營收
+    cumulative_last_year: int | None
+
+
+@dataclass(frozen=True)
+class Valuation:
+    """取樣日的本益比、股價淨值比與殖利率（RESEARCH_PLAN.md 4.5、R25）。虧損的本益比沒有值。"""
+
+    code: str
+    date: date
+    market: Market
+    pe: float | None
+    pb: float | None
+    dividend_yield: float | None    # %
+
+
+@dataclass(frozen=True)
+class SharesOutstanding:
+    """取樣日的發行股數（股）。"""
+
+    code: str
+    date: date
+    market: Market
+    shares: int
+
+
 CLOSED = "closed"                   # 抓取紀錄的狀態：非交易日
 OK = "ok"
 

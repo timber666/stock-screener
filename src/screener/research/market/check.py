@@ -445,6 +445,42 @@ def check_listings(quotes: pd.DataFrame, first_day: str) -> Section:
 
 # --- 8. 證券分類 -----------------------------------------------------------------
 
+def check_fundamentals(revenue: pd.DataFrame, valuations: pd.DataFrame, shares: pd.DataFrame,
+                       quotes: pd.DataFrame) -> Section:
+    """月營收、本益比與發行股數（M9，RESEARCH_PLAN.md 4.4、4.5）：涵蓋範圍與數值的範圍。"""
+    section = Section("基本面資料")
+    if revenue.empty and valuations.empty and shares.empty:
+        section.lines.append("還沒有基本面資料（market-update 會自動補上）")
+        return section
+    if not revenue.empty:
+        months = revenue.groupby("month")["code"].nunique()
+        negative = revenue[revenue["revenue"] < 0]
+        inverted = revenue[revenue["cumulative"] < revenue["revenue"]]
+        section.lines.append(
+            f"月營收 {len(revenue):,} 筆，{len(months)} 個月（{months.index[0][:7]}～{months.index[-1][:7]}），"
+            f"每月 {months.min():,}～{months.max():,} 檔；產業別 {revenue['industry'].nunique()} 類；"
+            f"當月營收為負 {len(negative):,} 筆；累計營收小於當月營收 {len(inverted):,} 筆")
+        rows = pd.concat([negative.assign(problem="當月營收為負"), inverted.assign(problem="累計營收小於當月營收")])
+        if len(rows):
+            section.tables["revenue_anomalies"] = rows[["code", "month", "industry", "revenue", "cumulative", "problem"]]
+    if not valuations.empty:
+        days = valuations["date"].nunique()
+        section.lines.append(
+            f"本益比等 {len(valuations):,} 筆，{days} 個取樣日；本益比沒有值（虧損）{valuations['pe'].isna().sum():,} 筆、"
+            f"不是正數 {(valuations['pe'] <= 0).sum():,} 筆；淨值比不是正數 {(valuations['pb'] <= 0).sum():,} 筆")
+    if not shares.empty:
+        closes = quotes[["code", "date", "close"]].dropna(subset=["close"])
+        merged = shares.merge(closes, on=["code", "date"], how="left")
+        merged["capitalization"] = merged["shares"] * merged["close"]
+        known = merged.dropna(subset=["capitalization"])
+        section.lines.append(
+            f"發行股數 {len(shares):,} 筆，{shares['date'].nunique()} 個取樣日；不是正數 {(shares['shares'] <= 0).sum():,} 筆；"
+            f"取樣日有收盤的 {len(known):,} 筆，市值範圍 {known['capitalization'].min() / 1e8:,.1f}～"
+            f"{known['capitalization'].max() / 1e8:,.0f} 億元" if len(known)
+            else f"發行股數 {len(shares):,} 筆，取樣日都沒有收盤")
+    return section
+
+
 def check_classification(securities: pd.DataFrame) -> Section:
     section = Section("證券分類（代號 4 碼數字，排除 00、91 開頭）")
     counts = securities["market"].value_counts()

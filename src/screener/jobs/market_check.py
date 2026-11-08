@@ -47,6 +47,7 @@ def run(config: AppConfig, research: ResearchConfig, *, out: TextIO | None = Non
                             for a, source in store.actions()])
         daily_index = {d.isoformat(): v for d, v in store.return_index().items()}
         monthly_index = {d.isoformat(): v for d, v in store.return_index(monthly=True).items()}
+        revenue, valuations, shares = store.revenue_frame(), store.valuation_frame(), store.shares_frame()
     if quotes.empty:
         raise JobFailed(f"{market.db_path} 沒有任何行情，請先執行 market-update")
 
@@ -65,7 +66,8 @@ def run(config: AppConfig, research: ResearchConfig, *, out: TextIO | None = Non
                  check.check_anomalies(quotes, trading_days, events),
                  check.check_delistings(securities, delistings, trading_days),
                  check.check_listings(quotes, trading_days[0]),
-                 check.check_classification(securities)]
+                 check.check_classification(securities),
+                 check.check_fundamentals(revenue, valuations, shares, quotes)]
 
     files = _write_tables(sections, market.check_dir)
     (out or sys.stdout).write(format_report(sections, trading_days, market.check_dir, files) + "\n")

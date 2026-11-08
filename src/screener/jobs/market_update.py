@@ -5,6 +5,8 @@
    以交易所的回應判斷是否為非交易日，並與交易日曆互相檢查。一天兩個市場抓完才在同一個交易內寫入，
    中斷後重新執行會從沒有抓取紀錄的那天繼續。
 3. 事件：除權息與報酬指數月表每月一期、減資每年一期；期間還沒結束時抓到的不算完成，下次再抓。
+4. 基本面（M9，RESEARCH_PLAN.md 4.4、4.5）：月營收與產業別每月每個市場兩頁（國內、外國公司），公布期限過後才抓；
+   本益比與發行股數每月第一個交易日取樣，上櫃的發行股數取自已存檔的每日行情，不另外請求。
 
 當天的行情可能還沒公布，查詢會被誤判為非交易日，所以只抓到昨天。原始回應另存壓縮檔，解析有誤時
 不必重新抓取。證交所、櫃買中心各自計算請求間隔（research.yaml 的 market.exchange）。
@@ -15,16 +17,16 @@ import json
 import logging
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
-from screener.config import AppConfig, ConfigError, ResearchConfig, Secrets
+from screener.config import AppConfig, ConfigError, MarketConfig, ResearchConfig, Secrets
 from screener.data.base import DataSourceError
 from screener.jobs import JobFailed
 from screener.models import CorporateAction, Market
-from screener.research.market import tpex, twse
+from screener.research.market import mops, tpex, twse
 from screener.research.market.common import is_common_stock
 from screener.research.market.finmind import MarketFinMindClient
 from screener.research.market.models import OK, DailyQuotes, Delisting, FetchRecord
@@ -46,6 +48,14 @@ RETURN_INDEX_MONTHLY = "tse_return_index"
 FINMIND_SOURCE = "finmind"          # corporate_actions 的來源：面額變更
 
 
+def revenue_source(market: Market, *, foreign: bool) -> str:
+    return f"{market.value}_revenue{'_foreign' if foreign else ''}"
+
+
+VALUATIONS = {Market.TSE: "tse_valuation", Market.OTC: "otc_valuation"}
+SHARES = {Market.TSE: "tse_shares", Market.OTC: "otc_shares"}
+
+
 class ExchangeSource(Protocol):
     def daily(self, day: date) -> Any: ...
     def dividend_results(self, start: date, end: date) -> Any: ...
@@ -54,6 +64,16 @@ class ExchangeSource(Protocol):
 
 class TwseSource(ExchangeSource, Protocol):
     def return_index(self, month: date) -> Any: ...
+    def valuation(self, day: date) -> Any: ...
+    def shares(self, day: date) -> Any: ...
+
+
+class TpexSource(ExchangeSource, Protocol):
+    def valuation(self, day: date) -> Any: ...
+
+
+class RevenueSource(Protocol):
+    def revenue_page(self, market: Market, month: date, *, foreign: bool) -> bytes: ...
 
 
 class CalendarSource(Protocol):
@@ -65,8 +85,9 @@ class CalendarSource(Protocol):
 @dataclass(frozen=True)
 class Sources:
     twse: TwseSource
-    tpex: ExchangeSource
+    tpex: TpexSource
     finmind: CalendarSource
+    mops: RevenueSource
 
 
 class RawArchive:
@@ -80,6 +101,20 @@ class RawArchive:
         path.parent.mkdir(parents=True, exist_ok=True)
         with gzip.open(path, "wt", encoding="utf-8") as f:
             json.dump(body, f, ensure_ascii=False)
+
+    def load(self, source: str, key: str) -> Any | None:
+        """save 存的回應；沒有時為 None。"""
+        path = self._root / source / f"{key}.json.gz"
+        if not path.is_file():
+            return None
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+
+    def save_text(self, source: str, key: str, text: str) -> None:
+        path = self._root / source / f"{key}.html.gz"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write(text)
 
 
 @dataclass
@@ -95,6 +130,10 @@ class MarketUpdateSummary:
     splits: int = 0
     delistings: int = 0
     securities: int = 0
+    revenues: int = 0               # 這次寫入的月營收筆數
+    valuations: int = 0             # 這次寫入的本益比筆數
+    shares: int = 0                 # 這次寫入的發行股數筆數
+    fundamental_periods: int = 0    # 這次完成的基本面資料（來源 × 月份）
 
 
 def run(config: AppConfig, research: ResearchConfig, secrets: Secrets, *, start: date | None = None,
@@ -110,18 +149,21 @@ def run(config: AppConfig, research: ResearchConfig, secrets: Secrets, *, start:
     if not secrets.finmind_token:
         logger.warning("未設定 FINMIND_TOKEN，以未登入身分查詢 FinMind（請求上限較低）")
     sources = Sources(twse=twse.TwseClient(market.exchange), tpex=tpex.TpexClient(market.exchange),
-                      finmind=MarketFinMindClient(config.settings.finmind, secrets.finmind_token))
+                      finmind=MarketFinMindClient(config.settings.finmind, secrets.finmind_token),
+                      mops=mops.MopsClient(market.mops))
     with SqliteMarketStore(market.db_path) as store:
-        return update_market(store, sources, archive=RawArchive(market.raw_dir), start=start, end=end, today=today)
+        return update_market(store, sources, market, archive=RawArchive(market.raw_dir), start=start, end=end,
+                             today=today)
 
 
-def update_market(store: SqliteMarketStore, sources: Sources, *, archive: RawArchive, start: date, end: date,
-                  today: date, clock: Callable[[], float] = time.monotonic) -> MarketUpdateSummary:
+def update_market(store: SqliteMarketStore, sources: Sources, market: MarketConfig, *, archive: RawArchive, start: date,
+                  end: date, today: date, clock: Callable[[], float] = time.monotonic) -> MarketUpdateSummary:
     summary = MarketUpdateSummary()
     calendar = _update_finmind(store, sources.finmind, start, end, today, summary)
     _update_quotes(store, sources, archive, calendar, start=start, end=end, today=today, summary=summary,
                    clock=clock)
     _update_events(store, sources, archive, start=start, end=end, today=today, summary=summary)
+    _update_fundamentals(store, sources, market, archive, start=start, end=end, today=today, summary=summary)
     summary.securities = store.refresh_securities()
     _log_summary(summary)
     return summary
@@ -267,6 +309,122 @@ def _update_events(store: SqliteMarketStore, sources: Sources, archive: RawArchi
         logger.debug("事件 %s：完成", where)
 
 
+# --- 4. 基本面 -----------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _Fetch:
+    """要抓的一份基本面資料。"""
+
+    source: str
+    start: date                     # 抓取紀錄的 key：月份的 1 日或取樣日
+    end: date                       # 這一天之後才算公布完成
+    run: Callable[[FetchRecord], tuple[int, int]]   # 抓取並寫入，回傳 (寫入筆數, 請求數)
+
+
+def _update_fundamentals(store: SqliteMarketStore, sources: Sources, market: MarketConfig, archive: RawArchive, *,
+                         start: date, end: date, today: date, summary: MarketUpdateSummary) -> None:
+    """同一個月的工作交錯排列（公開資訊觀測站、證交所、櫃買中心各自計算間隔），縮短總時間。"""
+    first_days: dict[tuple[int, int], date] = {}
+    for day in store.trading_days():
+        if start <= day <= end:
+            first_days.setdefault((day.year, day.month), day)
+    fetches: list[_Fetch] = []
+    for month, month_end in _months(start, end):
+        sample = first_days.get((month.year, month.month))
+        fetches += _month_fetches(store, sources, market, archive, month, month_end, sample, today, summary)
+    records = {source: store.fetch_records(source) for source in {fetch.source for fetch in fetches}}
+    todo = [fetch for fetch in fetches if fetch.start not in records[fetch.source]
+            or not records[fetch.source][fetch.start].complete]
+    logger.info("基本面：要抓 %d 份（月營收、本益比、發行股數）", len(todo))
+    for n, fetch in enumerate(todo, start=1):
+        record = FetchRecord(fetch.source, fetch.start, fetch.end, OK, 0, today)
+        try:
+            rows, requests = fetch.run(record)
+        except (DataSourceError, ValueError, IndexError) as exc:      # ValueError、IndexError：資料列的格式不符
+            raise JobFailed(f"基本面 {fetch.source} {fetch.start} 抓取失敗：{exc}。已完成 {n - 1}/{len(todo)} 份，"
+                            f"重新執行會從中斷處繼續") from exc
+        summary.requests += requests
+        summary.fundamental_periods += 1
+        logger.debug("基本面 %s %s：%d 筆", fetch.source, fetch.start, rows)
+        if n % PROGRESS_EVERY == 0 or n == len(todo):
+            logger.info("基本面 [%d/%d] %s %s：%d 筆", n, len(todo), fetch.source, fetch.start, rows)
+
+
+def _month_fetches(store: SqliteMarketStore, sources: Sources, market: MarketConfig, archive: RawArchive, month: date,
+                   month_end: date, sample: date | None, today: date, summary: MarketUpdateSummary) -> list[_Fetch]:
+    fetches: list[_Fetch] = []
+    following = month_end + timedelta(days=1)
+    published = following.replace(day=market.revenue_available_day)
+    if today > published:                   # 法定期限之前的頁面還不完整，不抓
+        settled = published + timedelta(days=market.revenue_settle_days)
+        for foreign in (False, True):
+            for market_ in Market:
+                fetches.append(_Fetch(revenue_source(market_, foreign=foreign), month, settled,
+                                      _revenue_fetch(store, sources, archive, market_, month, foreign, summary)))
+    if sample is not None:
+        fetches += [
+            _Fetch(VALUATIONS[Market.TSE], sample, sample,
+                   _sample_fetch(store.record_valuations, sources.twse.valuation, twse.parse_valuation, archive,
+                                 VALUATIONS[Market.TSE], sample, summary, "valuations")),
+            _Fetch(VALUATIONS[Market.OTC], sample, sample,
+                   _sample_fetch(store.record_valuations, sources.tpex.valuation, tpex.parse_valuation, archive,
+                                 VALUATIONS[Market.OTC], sample, summary, "valuations")),
+            _Fetch(SHARES[Market.TSE], sample, sample,
+                   _sample_fetch(store.record_shares, sources.twse.shares, twse.parse_shares, archive,
+                                 SHARES[Market.TSE], sample, summary, "shares")),
+            _Fetch(SHARES[Market.OTC], sample, sample, _otc_shares_fetch(store, sources, archive, sample, summary)),
+        ]
+    return fetches
+
+
+def _revenue_fetch(store: SqliteMarketStore, sources: Sources, archive: RawArchive, market: Market, month: date,
+                   foreign: bool, summary: MarketUpdateSummary) -> Callable[[FetchRecord], tuple[int, int]]:
+    def run(record: FetchRecord) -> tuple[int, int]:
+        source = revenue_source(market, foreign=foreign)
+        content = sources.mops.revenue_page(market, month, foreign=foreign)
+        archive.save_text(source, f"{month:%Y%m}", mops.as_text(content))
+        revenues = mops.parse_revenue(content, month, market, f"{source} {month:%Y-%m}")
+        store.record_revenues(replace(record, rows=len(revenues)), revenues)
+        summary.revenues += len(revenues)
+        return len(revenues), 1
+
+    return run
+
+
+def _sample_fetch(write: Callable[[FetchRecord, Any], None], fetch: Callable[[date], Any],
+                  parse: Callable[[Any, date], Any], archive: RawArchive, source: str, day: date,
+                  summary: MarketUpdateSummary, counter: str) -> Callable[[FetchRecord], tuple[int, int]]:
+    def run(record: FetchRecord) -> tuple[int, int]:
+        body = fetch(day)
+        archive.save(source, f"{day:%Y%m%d}", body)
+        rows = parse(body, day)
+        write(replace(record, rows=len(rows)), rows)
+        setattr(summary, counter, getattr(summary, counter) + len(rows))
+        return len(rows), 1
+
+    return run
+
+
+def _otc_shares_fetch(store: SqliteMarketStore, sources: Sources, archive: RawArchive, day: date,
+                      summary: MarketUpdateSummary) -> Callable[[FetchRecord], tuple[int, int]]:
+    """上櫃的發行股數在每日行情裡：優先用已存檔的回應，沒有時才重抓一次。"""
+
+    def run(record: FetchRecord) -> tuple[int, int]:
+        key = f"{day:%Y}/{day:%Y%m%d}"
+        body = archive.load(daily_source(Market.OTC), key)
+        requests = 0
+        if body is None:
+            body = sources.tpex.daily(day)
+            archive.save(daily_source(Market.OTC), key, body)
+            requests = 1
+        rows = tpex.parse_shares(body, day)
+        store.record_shares(replace(record, rows=len(rows)), rows)
+        summary.shares += len(rows)
+        return len(rows), requests
+
+    return run
+
+
 def _record(source: str, start: date, end: date, rows: int, today: date) -> FetchRecord:
     return FetchRecord(source, start, end, OK, rows, today)
 
@@ -281,10 +439,11 @@ def _months(start: date, end: date) -> Iterator[tuple[date, date]]:
 
 def _log_summary(summary: MarketUpdateSummary) -> None:
     logger.info("全市場資料更新完成：交易日 %d 天、非交易日 %d 天（已有紀錄略過 %d 天）；事件 %d 期，除權息 %d 筆、"
-                "減資 %d 筆；面額變更 %d 筆、下市 %d 檔；證券 %d 檔；證交所與櫃買中心請求 %d 次",
+                "減資 %d 筆；面額變更 %d 筆、下市 %d 檔；證券 %d 檔；基本面 %d 份，月營收 %d 筆、本益比 %d 筆、"
+                "發行股數 %d 筆；請求 %d 次（證交所、櫃買中心、公開資訊觀測站）",
                 summary.trading_days, summary.closed_days, summary.skipped_days, summary.event_periods,
                 summary.dividends, summary.reductions, summary.splits, summary.delistings, summary.securities,
-                summary.requests)
+                summary.fundamental_periods, summary.revenues, summary.valuations, summary.shares, summary.requests)
     if summary.off_calendar:
         logger.warning("有行情卻不在 FinMind 交易日曆上的日子 %d 天：%s", len(summary.off_calendar),
                        "、".join(map(str, summary.off_calendar)))

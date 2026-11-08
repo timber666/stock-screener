@@ -1,6 +1,6 @@
 """CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。
 
-研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check）的程式在執行該指令時才匯入：每日排程的 update、scan
+研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check、factor-report）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
 """
 
@@ -119,8 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
     market_parser = commands.add_parser(
         "market-update",
         help="全市場資料：補抓證交所、櫃買中心的每日行情與事件到 market.db（研究使用）",
-        description="補抓上市、上櫃普通股的每日行情、報酬指數、除權息與減資到 market.db（設定在 config/research.yaml 的 "
-                    "market）。第一次從期間起點開始回補，中斷後重新執行會從中斷處繼續；只抓到昨天。",
+        description="補抓上市、上櫃普通股的每日行情、報酬指數、除權息與減資，以及月營收、本益比與發行股數到 market.db"
+                    "（設定在 config/research.yaml 的 market）。第一次從期間起點開始回補，中斷後重新執行會從中斷處繼續；只抓到昨天。",
     )
     market_parser.add_argument("--start", type=_parse_date, metavar="YYYY-MM-DD",
                                help="只查詢這一天以後（預設為 research.yaml 的 market.start）")
@@ -132,6 +132,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="檢查 market.db：與 screener.db 重疊的價格、除權息與減資、報酬指數、異常值、下市與轉上市，"
                     "終端印出摘要，明細寫成 CSV（research.yaml 的 market.check_dir）。",
     )
+
+    factor_parser = commands.add_parser(
+        "factor-report",
+        help="單因子研究：Rank IC、分位數報酬、換手率、產業中性前後（研究使用）",
+        description="以全市場的動態股票池評估 research.yaml 的因子：終端印出摘要，輸出 summary.csv、ic.csv、decay.csv、"
+                    "groups.csv 與 report.html（research.yaml 的 factors.output_dir）。需先執行 market-update。",
+    )
+    factor_parser.add_argument("--factors", type=_parse_ids, metavar="ID,ID", help="只跑指定的因子 id，以逗號分隔")
 
     analyze_parser = commands.add_parser(
         "analyze",
@@ -157,7 +165,7 @@ def _add_universe(parser: argparse.ArgumentParser) -> None:
 def _parse_ids(value: str) -> list[str]:
     ids = [part.strip() for part in value.split(",") if part.strip()]
     if not ids:
-        raise argparse.ArgumentTypeError("至少要有一個規則 id")
+        raise argparse.ArgumentTypeError("至少要有一個 id")
     return ids
 
 
@@ -232,6 +240,11 @@ def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets,
         from screener.jobs import market_check
 
         market_check.run(config, load_research_config(args.config_dir / "research.yaml"))
+    elif args.command == "factor-report":
+        from screener.jobs import factor_report     # 需要研究套件 plotly
+
+        factor_report.run(config, load_research_config(args.config_dir / "research.yaml"),
+                          load_backtest_config(args.config_dir / "backtest.yaml"), factor_ids=args.factors)
     elif args.command == "trade-backtest":
         from screener.jobs import trade_backtest    # 需要研究套件 plotly
 

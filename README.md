@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M0–M8（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
+> 🚧 開發中：已完成 M0–M9（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
 
 ## 架構
 
@@ -47,7 +47,7 @@ pip install -e ".[dev,research]"
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
 | `config/settings.yaml` | 資料庫、log 與 MIS 原始快照的路徑、回補天數；FinMind、MIS、Discord 的請求頻率、逾時與重試 |
 | `config/backtest.yaml` | 訊號回測的期間、持有天數、交易成本等；只有 `backtest` 會讀取 |
-| `config/research.yaml` | 研究指令的設定：`events` 的重查天數與交叉驗證門檻、證交所 ISIN 清單的請求設定、訊號成績單的持有天數與輸出位置、全市場資料（`market`：期間、股票池、請求間隔、`market.db` 的位置）；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
+| `config/research.yaml` | 研究指令的設定：`events` 的重查天數與交叉驗證門檻、證交所 ISIN 清單的請求設定、訊號成績單的持有天數與輸出位置、全市場資料（`market`：期間、股票池、請求間隔、`market.db` 的位置）、單因子研究（`factors`：持有天數、分組數、因子清單）；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
 | `.env` | FinMind token、Discord webhook URL（`DISCORD_WEBHOOK_URL` 每日選股、`DISCORD_RESEARCH_WEBHOOK_URL` 研究的定期報告，建議另開一個頻道）；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
 設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類，都會直接報錯並指出位置。
@@ -71,7 +71,8 @@ python -m screener --help
 | `python -m screener trade-backtest` | 交易回測：照進場與出場規則模擬 30 萬元的帳戶，比較檔數上限與挑選方式；`--validate` 只檢查選定的一組在驗證段的結果 |
 | `python -m screener signal-report` | 訊號成績單：上一週推播的訊號，收盤是否仍成立與之後的表現，推播到研究頻道；`--end` 指定期間的最後一天，`--dry-run` 只印在終端 |
 | `python -m screener market-update` | 全市場資料：補抓證交所、櫃買中心的每日行情與事件到 `data/market.db`（研究使用）；`--start`、`--end` 只抓指定期間 |
-| `python -m screener market-check` | 全市場資料的品質報告：與 `screener.db` 重疊的價格、除權息與減資、報酬指數、異常值、下市與轉上市 |
+| `python -m screener market-check` | 全市場資料的品質報告：與 `screener.db` 重疊的價格、除權息與減資、報酬指數、異常值、下市與轉上市、基本面資料的涵蓋範圍 |
+| `python -m screener factor-report` | 單因子研究：Rank IC、分位數報酬、換手率、衰減、產業中性前後，觀察段與驗證段分列；`--factors` 只跑指定的因子 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
 
@@ -183,6 +184,19 @@ python -m screener backtest
 
 - 除權息旺季（每年 6～9 月）結束後：事件多，9 月底更新一次，讓近期訊號的報酬正確還原。
 
+### 單因子研究（`factor-report`）
+
+檢驗「哪些可以算成分數的特徵，能預測之後的報酬」：以全市場的動態股票池計算每個因子，並把現有的技術規則改寫成連續分數。定義見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.4、4.5。
+
+```bash
+python -m screener factor-report
+python -m screener factor-report --factors ep,mom_12_1   # 只跑指定的因子
+```
+
+- 因子清單在 `config/research.yaml` 的 `factors.definitions`：動能、短期反轉、波動、流動性、現有規則的分數（站上均線的程度、量比、長紅長黑、距前高前低、均線排列、趨勢標籤）、月營收、本益比與淨值比、規模、週轉率。新增因子只要寫一個函式並以 `@register_factor` 註冊。
+- 指標：Rank IC、ICIR、t 值（每 h 天取一次）、5 組的分位數報酬（另列排除當天收漲跌停）、換手率與扣成本後的超額、1～20 日的 IC 衰減、產業中性前後的比較。觀察段與驗證段分列；只用當時可得的資料（月營收在次月 10 日之後才能用，產業別用當時的分類）。
+- 輸出：終端摘要，以及 `data/research/factors/` 的 `summary.csv`、`ic.csv`、`decay.csv`、`groups.csv` 與 `report.html`。
+
 ### 全市場資料（`market-update`、`market-check`、`--universe market`）
 
 觀察清單是依目前的熱門族群挑的，回測結果有選擇偏差。全市場資料以證交所、櫃買中心的每日收盤行情建立 2015 年起所有上市、上櫃普通股的日 K（含之後才下市的股票），每月依成交金額取前 500 檔當作股票池，用相同的規則重跑回測並和觀察清單並列。定義見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.3。
@@ -195,6 +209,7 @@ python -m screener market-update
 - 之後由排程每週六 09:00 補抓上一週（`stock-screener-market`）。只抓到昨天：當天的行情可能還沒公布。
 - 資料存在 `data/market.db`（研究專用，每日的 `scan`、`update` 不讀取），原始回應另存 `data/research/market_raw/`（壓縮檔，約 200 MB）。
 - 交易日以交易所的回應判斷，並與 FinMind 的交易日曆互相檢查（2016～2018 年有週六的補班交易日）。
+- 月營收與當時的產業別（公開資訊觀測站）、本益比、淨值比、殖利率與發行股數（每月第一個交易日取樣）併入同一個指令，供單因子研究使用，第一次約 1,000 次請求、約 50 分鐘；之後每週補上。
 - 除權息、減資以證交所、櫃買中心的官方前後價格還原，面額變更用 FinMind；除權息日的行情不提供漲跌，推不出參考價，只在沒有官方資料時以行情推出的參考價補上。
 
 ```bash
