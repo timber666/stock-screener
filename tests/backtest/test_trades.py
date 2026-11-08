@@ -253,6 +253,16 @@ def test_metrics_on_a_hand_made_account() -> None:
     assert m["benchmark_return"] == pytest.approx(0.0)
 
 
+def test_ruined_account_has_minus_100_percent_cagr() -> None:
+    # 虧光之後最低手續費仍照收，現金可能變成負數：年化記為 −100%，不是無效值
+    days = tuple(AccountDay(day=DAYS[i], cash=v, holdings_value=0.0, positions=0, candidates=0, bought=0,
+                            rejected_full=0, skipped_cash=0) for i, v in enumerate([100.0, 1.0, -5.0]))
+    result = AccountResult(settings=settings(cap=1, capital=100.0), trades=(), days=days)
+
+    m = account_metrics(result, pd.Series(100.0, index=DAYS[:3]))
+    assert m["cagr"] == -100.0 and m["total_return"] == pytest.approx(-105.0)
+
+
 # --- 設定 -------------------------------------------------------------------
 
 def test_repo_trade_config() -> None:

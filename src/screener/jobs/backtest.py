@@ -2,6 +2,9 @@
 
 逐日回放規則、計算訊號後的報酬並與同日觀察清單的平均比較，輸出終端摘要、CSV 與圖表報表。
 各股票的訊號互不相關，以多個行程平行計算；歷史資料在主行程讀出後才分給各行程，各行程不碰資料庫。
+
+--universe market 改用全市場的動態股票池（RESEARCH_PLAN.md 4.3）：資料來自 market.db，基準為同日當月股票池的
+平均，輸出到 research.yaml 的 market.output_dir；另以相同規則重跑觀察清單，在兩者都有資料的期間並列。
 """
 
 import logging
@@ -19,13 +22,21 @@ from screener.backtest.report import format_summary, write_csv, write_html
 from screener.backtest.signals import (StockHistory, add_flags, add_returns, dedupe, find_signals,
                                        forward_returns, load_history)
 from screener.backtest.stats import OBSERVE, VALIDATE, summarize
-from screener.config import AppConfig, BacktestConfig, ConfigError, RulesConfig, TrendConfig
+from screener.config import (AppConfig, BacktestConfig, ConfigError, MarketConfig, ResearchConfig, RulesConfig,
+                             TrendConfig)
 from screener.data.base import EventCoverage
 from screener.engine import Engine
 from screener.jobs import JobFailed, open_existing_store
 from screener.models import Side
+from screener.research.market.compare import format_signal_comparison, signal_comparison
+from screener.research.market.history import MarketHistories, load_market_histories
+from screener.research.market.store import SqliteMarketStore
 
 logger = logging.getLogger(__name__)
+
+WATCHLIST, MARKET = "watchlist", "market"
+UNIVERSES = (WATCHLIST, MARKET)
+MARKET_BASELINE = "當月股票池"
 
 
 @dataclass(frozen=True)
@@ -42,11 +53,17 @@ class BacktestResult:
 
 def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rules_label: str,
         rule_ids: Sequence[str] | None, start: date | None, end: date | None, horizon: int | None,
-        out: TextIO | None = None, workers: int | None = None) -> BacktestResult:
+        universe: str = WATCHLIST, research: ResearchConfig | None = None, out: TextIO | None = None,
+        workers: int | None = None) -> BacktestResult:
     horizon = horizon or backtest.summary_horizon
     if horizon not in backtest.horizons:
         raise ConfigError(f"--horizon {horizon}：應為 backtest.yaml 的 horizons 其中之一 {list(backtest.horizons)}")
     engine = build_engine(rules, rule_ids)       # 先檢查規則，錯誤時在讀資料前就結束
+    if universe == MARKET:
+        if research is None:
+            raise ValueError("全市場需要 research.yaml 的設定")
+        return _run_market(config, backtest, research.market, rules=rules, rules_label=rules_label,
+                           rule_ids=rule_ids, start=start, end=end, horizon=horizon, out=out, workers=workers)
     histories, warnings = load_histories(config)
 
     start = start or backtest.signal_start
@@ -59,9 +76,76 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
     output_dir = backtest.output_dir
     write_csv(result, backtest, output_dir)
     write_html(result, backtest, horizon, output_dir / "report.html")
-    (out or sys.stdout).write(format_summary(result, backtest, horizon, len(histories), rules_label,
+    (out or sys.stdout).write(format_summary(result, backtest, horizon, f"觀察清單 {len(histories)} 檔", rules_label,
                                              output_dir, warnings=warnings) + "\n")
     return result
+
+
+def _run_market(config: AppConfig, backtest: BacktestConfig, market: MarketConfig, *, rules: RulesConfig,
+                rules_label: str, rule_ids: Sequence[str] | None, start: date | None, end: date | None, horizon: int,
+                out: TextIO | None, workers: int | None) -> BacktestResult:
+    loaded = load_market(market)
+    start = start or market.signal_start
+    end = end or loaded.last_day
+    logger.info("訊號回測（全市場）%s ~ %s：曾入選股票池 %d 檔，規則檔 %s", start, end, len(loaded.histories), rules_label)
+    result = backtest_histories(loaded.histories, rules=rules, rule_ids=rule_ids, backtest=backtest, start=start,
+                                end=end, workers=workers)
+
+    output_dir = market.output_dir
+    write_csv(result, backtest, output_dir)
+    write_html(result, backtest, horizon, output_dir / "report.html", baseline_label=MARKET_BASELINE)
+    text = format_summary(result, backtest, horizon, market_label(market, loaded), rules_label, output_dir,
+                          warnings=market_warnings(loaded), baseline_label=MARKET_BASELINE)
+    comparison = _compare_watchlist(config, result, loaded, backtest, market, rules=rules, rule_ids=rule_ids,
+                                    start=start, end=end, horizon=horizon, workers=workers)
+    (out or sys.stdout).write(f"{text}\n\n{comparison}\n")
+    return result
+
+
+def _compare_watchlist(config: AppConfig, result: BacktestResult, loaded: MarketHistories, backtest: BacktestConfig,
+                       market: MarketConfig, *, rules: RulesConfig, rule_ids: Sequence[str] | None, start: date,
+                       end: date, horizon: int, workers: int | None) -> str:
+    """以相同規則重跑觀察清單，在兩者都有資料的期間並列；寫出 comparison.csv，回傳終端的文字。"""
+    watchlist, _ = load_histories(config)
+    compare_start = max(market.compare_start, start)
+    compare_end = min(end, max(h.bars.index[-1] for h in watchlist))
+    path = market.output_dir / "comparison.csv"
+    path.unlink(missing_ok=True)
+    if compare_start > compare_end:
+        return f"■ 與觀察清單並列：{compare_start} 之後沒有兩者都有資料的期間，略過"
+    logger.info("對照：觀察清單 %d 檔，%s ~ %s", len(watchlist), compare_start, compare_end)
+    watch = backtest_histories(watchlist, rules=rules, rule_ids=rule_ids, backtest=backtest, start=compare_start,
+                               end=compare_end, workers=workers)
+    comparison = signal_comparison(result, watch, loaded.histories, watchlist, backtest, start=compare_start,
+                                   end=compare_end, horizon=horizon)
+    comparison.round(4).to_csv(path, index=False, encoding="utf-8-sig")
+    text = format_signal_comparison(comparison, start=compare_start, end=compare_end, horizon=horizon)
+    return f"{text}\n  明細：{path}"
+
+
+def load_market(market: MarketConfig) -> MarketHistories:
+    """讀出全市場曾經入選股票池的股票（訊號回測與交易回測共用）。"""
+    if not market.db_path.is_file():
+        raise JobFailed(f"找不到 {market.db_path}，請先執行 market-update")
+    with SqliteMarketStore(market.db_path) as store:
+        try:
+            loaded = load_market_histories(store, market.universe)
+        except ValueError as exc:
+            raise JobFailed(f"{market.db_path}：{exc}，請先執行 market-update") from exc
+    if not loaded.histories:
+        raise JobFailed(f"股票池是空的：market.db 的交易日不足 {market.universe.lookback_days} 天")
+    return loaded
+
+
+def market_label(market: MarketConfig, loaded: MarketHistories) -> str:
+    return (f"全市場股票池（每月第一個交易日依前 {market.universe.lookback_days} 日平均成交金額取前 "
+            f"{market.universe.size} 檔，{loaded.universe.first_day} 起；曾入選 {len(loaded.histories):,} 檔）")
+
+
+def market_warnings(loaded: MarketHistories) -> list[str]:
+    if not loaded.derived_events:
+        return []
+    return [f"還原權息：{loaded.derived_events:,} 天沒有官方資料，以行情推出的參考價補上（明細見 market-check）"]
 
 
 def load_histories(config: AppConfig) -> tuple[list[StockHistory], list[str]]:

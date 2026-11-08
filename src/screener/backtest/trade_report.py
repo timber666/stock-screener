@@ -24,7 +24,7 @@ class TradeBacktestResult:
     candidates: tuple[Candidate, ...]
     runs: tuple[AccountResult, ...]                 # 固定的挑選方式
     random_runs: dict[int, tuple[AccountResult, ...]]   # 檔數上限 → 各次隨機挑選
-    benchmark: pd.Series                            # 全清單每天等權的帳戶權益
+    benchmark: pd.Series                            # 全清單（全市場為當月股票池）每天等權的帳戶權益
 
 
 def pick_label(pick: str, trade: TradeConfig, runs: int | None = None) -> str:
@@ -58,12 +58,14 @@ def summary_table(result: TradeBacktestResult, trade: TradeConfig) -> pd.DataFra
 
 # --- 終端摘要 ---------------------------------------------------------------
 
-def format_summary(result: TradeBacktestResult, trade: TradeConfig, cost: CostConfig, *, observed: int,
-                   rules_label: str, output_dir: Path, warnings: Sequence[str] = ()) -> str:
+def format_summary(result: TradeBacktestResult, trade: TradeConfig, cost: CostConfig, *, universe_label: str,
+                   rules_label: str, output_dir: Path, warnings: Sequence[str] = (),
+                   baseline_label: str = "全清單") -> str:
+    """universe_label：股票的範圍，例「觀察清單 290 檔」；baseline_label：基準的名稱（X 每天等權）。"""
     table = summary_table(result, trade)
     lines = [
         f"交易回測｜{result.segment} {result.start} ~ {result.end}｜初始資金 {trade.initial_capital:,.0f} 元｜"
-        f"觀察清單 {observed} 檔｜規則檔 {rules_label}",
+        f"{universe_label}｜規則檔 {rules_label}",
         f"進場訊號 {len(result.candidates):,} 個（收漲停不成交）｜每天收盤先賣再買，單筆金額 = 當天權益 ÷ 檔數上限，買零股",
         f"成本：手續費 {cost.commission_pct:g}% × {cost.commission_discount:g}（每筆最低 {trade.min_commission:g} 元）、"
         f"證交稅 {cost.tax_pct:g}%；沒有計入滑價",
@@ -83,7 +85,7 @@ def format_summary(result: TradeBacktestResult, trade: TradeConfig, cost: CostCo
     lines += _table(["上限", "挑選", "總報酬", "年化", "最大回撤", "交易", "勝率", "賺賠比", "平均檔數",
                      "資金使用", "空手日", "額滿放棄", "成本(元)"], rows)
     first = table.iloc[0]
-    lines += ["", f"基準（全清單每天等權，不扣成本）：總報酬 {_pct(first['benchmark_return'])}、"
+    lines += ["", f"基準（{baseline_label}每天等權，不扣成本）：總報酬 {_pct(first['benchmark_return'])}、"
                   f"年化 {_pct(first['benchmark_cagr'])}、最大回撤 {_pct(first['benchmark_max_drawdown'])}",
               f"隨機挑選的總報酬括號內為 {RANDOM_LOW}%～{RANDOM_HIGH}% 範圍；固定的挑選方式落在範圍內，代表看不出挑選能力",
               "",
@@ -151,7 +153,7 @@ _COLORS = ["#2a78d6", "#E8853D", "#5DA271", "#9467bd"]
 _GRAY = "#8d8c87"
 
 
-def write_html(result: TradeBacktestResult, trade: TradeConfig, path: Path) -> None:
+def write_html(result: TradeBacktestResult, trade: TradeConfig, path: Path, baseline_label: str = "全清單") -> None:
     """每個檔數上限兩張圖：帳戶權益（含隨機範圍與基準）、回撤。圖表程式庫內嵌，離線也能看。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     caps = sorted({run.settings.max_positions for run in result.runs} | set(result.random_runs))
@@ -170,7 +172,7 @@ def write_html(result: TradeBacktestResult, trade: TradeConfig, path: Path) -> N
             html = figure.to_html(full_html=False, include_plotlyjs="inline" if not parts else False)
             parts.append(f"<h2>{title}</h2><p class='note'>{note}</p>{html}")
     header = (f"{result.segment} {result.start} ~ {result.end}｜初始資金 {trade.initial_capital:,.0f} 元｜"
-              f"進場訊號 {len(result.candidates):,} 個｜基準為全清單每天等權（不扣成本）")
+              f"進場訊號 {len(result.candidates):,} 個｜基準為{baseline_label}每天等權（不扣成本）")
     path.write_text(_PAGE.format(title="交易回測報表", header=header, body="\n".join(parts)), encoding="utf-8")
 
 

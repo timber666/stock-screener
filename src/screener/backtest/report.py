@@ -24,17 +24,20 @@ _SIDE_LABELS = {side.value: side.label for side in Side}
 
 # --- 終端摘要 ---------------------------------------------------------------
 
-def format_summary(result: "BacktestResult", backtest: BacktestConfig, horizon: int, observed: int,
-                   rules_label: str, output_dir: Path, warnings: Sequence[str] = ()) -> str:
-    """warnings：資料方面的提醒（例：除權息資料沒有涵蓋到最新的日 K），列在開頭的說明之後。"""
+def format_summary(result: "BacktestResult", backtest: BacktestConfig, horizon: int, universe_label: str,
+                   rules_label: str, output_dir: Path, warnings: Sequence[str] = (),
+                   baseline_label: str = "觀察清單") -> str:
+    """universe_label：股票的範圍，例「觀察清單 290 檔」；baseline_label：基準的名稱（超額 = 減去同日 X 的平均報酬）。
+    warnings：資料方面的提醒（例：除權息資料沒有涵蓋到最新的日 K），列在開頭的說明之後。"""
     signals, summary = result.signals, result.summary
     kept = int(signals["kept"].sum()) if len(signals) else 0
     lines = [
         f"訊號回測 {result.start} ~ {result.end}｜觀察段至 {backtest.validation_start - timedelta(days=1)}，"
         f"驗證段 {backtest.validation_start} 起",
-        f"觀察清單 {observed} 檔｜訊號 {len(signals):,} 個（去重後 {kept:,}）｜規則檔 {rules_label}｜"
+        f"{universe_label}｜訊號 {len(signals):,} 個（去重後 {kept:,}）｜規則檔 {rules_label}｜"
         f"來回成本 {backtest.cost.round_trip_pct:.3f}%",
-        "報酬以還原權息的收盤價計算；勝率 = 方向報酬 > 0 的比例；超額 = 減去同日觀察清單的平均報酬（空方同樣反向）",
+        f"報酬以還原權息的收盤價計算；勝率 = 方向報酬 > 0 的比例；"
+        f"超額 = 減去同日{baseline_label}的平均報酬（空方同樣反向）",
         *(f"⚠️ {warning}" for warning in warnings),
         "",
         f"■ 持有 {horizon} 日（去重，排除漲跌停鎖死）",
@@ -147,12 +150,13 @@ _DIVERGING = [[0.0, "#E24B4A"], [0.5, "#f0efec"], [1.0, "#2a78d6"]]     # 紅 = 
 _BLUE = "#2a78d6"
 
 
-def write_html(result: "BacktestResult", backtest: BacktestConfig, horizon: int, path: Path) -> None:
+def write_html(result: "BacktestResult", backtest: BacktestConfig, horizon: int, path: Path,
+               baseline_label: str = "觀察清單") -> None:
     """四張圖：總覽熱圖、觀察段 vs 驗證段、累積超額報酬、最大有利／不利幅度。圖表程式庫內嵌，離線也能看。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     names = [f"{name}（{_SIDE_LABELS[result.rule_sides[rule_id]]}）" for rule_id, name in result.rule_names.items()]
     figures = [
-        ("總覽：平均超額報酬（%），規則 × 持有天數", "去重、排除漲跌停鎖死。藍 = 優於同日觀察清單平均，紅 = 劣於。",
+        ("總覽：平均超額報酬（%），規則 × 持有天數", f"去重、排除漲跌停鎖死。藍 = 優於同日{baseline_label}平均，紅 = 劣於。",
          _heatmap(result, backtest, names)),
         (f"觀察段 vs 驗證段：持有 {horizon} 日的平均超額報酬（%）",
          "驗證段明顯變差的規則，可能是參數貼合了過去。", _segment_bars(result, horizon, names)),
@@ -172,7 +176,7 @@ def write_html(result: "BacktestResult", backtest: BacktestConfig, horizon: int,
     kept = int(result.signals["kept"].sum()) if len(result.signals) else 0
     header = (f"{result.start} ~ {result.end}｜觀察段至 {backtest.validation_start - timedelta(days=1)}，"
               f"驗證段 {backtest.validation_start} 起｜訊號 {len(result.signals):,} 個（去重後 {kept:,}）｜"
-              f"報酬以還原權息的收盤價計算，超額 = 減去同日觀察清單的平均報酬")
+              f"報酬以還原權息的收盤價計算，超額 = 減去同日{baseline_label}的平均報酬")
     path.write_text(_PAGE.format(title="訊號回測報表", header=header, body="\n".join(parts)), encoding="utf-8")
 
 

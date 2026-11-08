@@ -34,7 +34,8 @@ def test_help_runs_as_module() -> None:
 
 
 RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screener.jobs.backtest",
-                    "screener.jobs.trade_backtest", "screener.jobs.corporate_events", "screener.jobs.signal_report")
+                    "screener.jobs.trade_backtest", "screener.jobs.corporate_events", "screener.jobs.signal_report",
+                    "screener.jobs.market_update", "screener.jobs.market_check")
 
 _LOADED_RESEARCH_MODULES = """
 import sys
@@ -487,6 +488,26 @@ def test_signal_report_failure_is_notified_in_research_channel(config_dir: Path,
     ((url, message),) = both_webhooks.sent
     assert url == RESEARCH_WEBHOOK_URL
     assert message.startswith("❌ 訊號成績單執行失敗（") and "找不到資料庫" in message
+
+
+# --- market-update、market-check（RESEARCH_PLAN.md 4.3）-----------------------------
+
+def test_market_update_failure_is_notified_in_research_channel(config_dir: Path,
+                                                               both_webhooks: type[RecordingWebhook]) -> None:
+    # 每週排程（R9）：失敗時錯誤通知推到研究頻道。測試不連網，第一個請求（FinMind 交易日曆）就會失敗
+    assert main(["--config-dir", str(config_dir), "market-update", "--start", "2026-11-02", "--end", "2026-11-06"]) \
+        == EXIT_FAILED
+
+    ((url, message),) = both_webhooks.sent
+    assert url == RESEARCH_WEBHOOK_URL
+    assert message.startswith("❌ 全市場資料更新執行失敗（")
+
+
+def test_market_check_without_database_fails_quietly(config_dir: Path, both_webhooks: type[RecordingWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "market-check"]) == EXIT_FAILED
+
+    assert "找不到" in read_log(config_dir) and "請先執行 market-update" in read_log(config_dir)
+    assert both_webhooks.sent == []                     # 手動執行的報告，不推播
 
 
 def test_dry_run_never_uses_webhook(config_dir: Path, webhook: type[FakeWebhook]) -> None:

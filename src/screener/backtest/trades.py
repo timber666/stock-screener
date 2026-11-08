@@ -55,14 +55,18 @@ def find_candidates(history: StockHistory, engine: Engine, trend_config: TrendCo
                     pick_ma: int) -> list[Candidate]:
     """start～end（含）符合進場規則、且沒有收在漲停的訊號（5.5），各自找出出場（5.4）。
 
-    與訊號回測相同，掛牌後第六個交易日之前不產生訊號（D38）。
+    與訊號回測相同，掛牌後第六個交易日之前（D38）與不在當月股票池的日子不產生訊號；進場後即使股票池
+    更換，仍照出場規則賣出。
     """
     bars = history.bars
     days = list(bars.index)
     closes, volumes = bars["close"].to_numpy(), bars["volume"].to_numpy()
     adjusted = history.adjusted["close"].to_numpy()
+    eligible = history.eligible()
     candidates = []
     for i in range(max(bisect_left(days, start), history.first_position, 1), bisect_right(days, end)):
+        if not eligible[i]:
+            continue
         ctx = build_context(history.info, bars.iloc[:i + 1], trend_config, is_tentative=False)
         if Side.LONG not in engine.entry_sides(ctx, engine.evaluate(ctx)) or _at_limit(history, i, Side.LONG):
             continue
@@ -289,11 +293,18 @@ def equity_series(result: AccountResult) -> pd.Series:
 
 def benchmark_series(histories: Sequence[StockHistory], calendar: Sequence[date], initial_capital: float) -> pd.Series:
     """全清單每天等權的報酬（還原權息、不扣成本）累積成的帳戶，從 calendar 第一天收盤開始。
-    與訊號回測的基準相同，掛牌後第六個交易日之前不列入。"""
-    returns = [h.adjusted["close"].pct_change().iloc[h.first_position + 1:] for h in histories]
+    與訊號回測的基準相同，掛牌後第六個交易日之前不列入；全市場只列入當天在股票池內的股票。"""
+    returns = [_benchmark_returns(h) for h in histories]
     daily = pd.concat(returns, axis=1).mean(axis=1).reindex(calendar).fillna(0.0)
     daily.iloc[0] = 0.0
     return initial_capital * (1 + daily).cumprod()
+
+
+def _benchmark_returns(history: StockHistory) -> pd.Series:
+    """每天的報酬；前一天要已過掛牌後前五日（與原本 iloc[first_position + 1:] 相同），且當天在股票池內。"""
+    keep = history.eligible()
+    keep[:history.first_position + 1] = False
+    return history.adjusted["close"].pct_change()[keep]
 
 
 def drawdown(equity: pd.Series) -> pd.Series:
@@ -318,7 +329,7 @@ def account_metrics(result: AccountResult, benchmark: pd.Series) -> dict[str, fl
     usage = [d.holdings_value / d.equity for d in result.days if d.equity > 0]
     return {
         "total_return": (equity.iloc[-1] / initial - 1) * 100,
-        "cagr": ((equity.iloc[-1] / initial) ** (1 / years) - 1) * 100,
+        "cagr": _annualized(equity.iloc[-1] / initial, years),
         "max_drawdown": float(dd.min()),
         "drawdown_days": positions.index(recovery_day if recovery_day is not None else positions[-1])
                          - positions.index(peak),
@@ -337,9 +348,14 @@ def account_metrics(result: AccountResult, benchmark: pd.Series) -> dict[str, fl
         "costs": sum(t.buy_fee + t.sell_fee + t.tax for t in result.trades),
         "final_equity": float(equity.iloc[-1]),
         "benchmark_return": (bench.iloc[-1] / bench.iloc[0] - 1) * 100,
-        "benchmark_cagr": ((bench.iloc[-1] / bench.iloc[0]) ** (1 / years) - 1) * 100,
+        "benchmark_cagr": _annualized(bench.iloc[-1] / bench.iloc[0], years),
         "benchmark_max_drawdown": float(drawdown(bench).min()),
     }
+
+
+def _annualized(growth: float, years: float) -> float:
+    """年化報酬（%）。權益歸零或為負（虧光後最低手續費仍照收）時為 −100%。"""
+    return (max(growth, 0.0) ** (1 / years) - 1) * 100
 
 
 def _longest_streak(pnls: Sequence[float]) -> int:

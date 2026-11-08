@@ -163,12 +163,36 @@ class SignalReportConfig:
 
 
 @dataclass(frozen=True)
+class UniverseConfig:
+    """全市場的股票池（RESEARCH_PLAN.md 4.3、R7）。"""
+
+    size: int                       # 每月第一個交易日，取平均成交金額前幾名
+    lookback_days: int              # 平均成交金額的交易日數（不含當天）
+
+
+@dataclass(frozen=True)
+class MarketConfig:
+    """全市場資料（RESEARCH_PLAN.md 4.3）：market-update、market-check 與 --universe market。"""
+
+    db_path: Path                   # market.db，每日系統不讀取（PROJECT_PLAN.md 10.4）
+    raw_dir: Path                   # 證交所、櫃買中心的原始回應（壓縮檔）
+    start: date                     # 回補的起點（R8）
+    signal_start: date              # --universe market 的訊號起點
+    compare_start: date             # 與觀察清單並列的起點
+    universe: UniverseConfig
+    output_dir: Path                # backtest、trade-backtest --universe market 的輸出
+    check_dir: Path                 # market-check 的明細
+    exchange: RequestSettings       # 證交所、櫃買中心的請求，兩邊各自計算間隔
+
+
+@dataclass(frozen=True)
 class ResearchConfig:
-    """research.yaml：只有研究指令（events、signal-report）會載入（PROJECT_PLAN.md 10.4）。"""
+    """research.yaml：只有研究指令會載入（PROJECT_PLAN.md 10.4）。"""
 
     events: EventsSettings
     isin: IsinSettings
     signal_report: SignalReportConfig
+    market: MarketConfig
 
 
 @dataclass(frozen=True)
@@ -414,10 +438,10 @@ def _parse_horizons(data: Mapping[str, Any], where: str) -> list[int]:
 # --- research.yaml ----------------------------------------------------------
 
 def load_research_config(path: Path) -> ResearchConfig:
-    """只有研究指令（events、signal-report）會載入，寫錯時不影響每日的掃描與更新（PROJECT_PLAN.md 10.4）。"""
+    """只有研究指令會載入，寫錯時不影響每日的掃描與更新（PROJECT_PLAN.md 10.4）。"""
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"events", "isin", "signal_report"}, where)
+    check_keys(data, {"events", "isin", "signal_report", "market"}, where)
 
     events_where = f"{where} > events"
     events_data = get_field(data, "events", dict, where)
@@ -446,7 +470,38 @@ def load_research_config(path: Path) -> ResearchConfig:
         backtest_summary=Path(get_field(report_data, "backtest_summary", str, report_where)),
     )
     require(signal_report.top_n >= 0, f"{report_where} > top_n：不可為負數")
-    return ResearchConfig(events=events, isin=isin, signal_report=signal_report)
+    market = _parse_market(get_field(data, "market", dict, where), f"{where} > market")
+    return ResearchConfig(events=events, isin=isin, signal_report=signal_report, market=market)
+
+
+def _parse_market(data: Mapping[str, Any], where: str) -> MarketConfig:
+    check_keys(data, {"db_path", "raw_dir", "start", "signal_start", "compare_start", "universe", "output_dir",
+                      "check_dir", "exchange"}, where)
+    universe_where = f"{where} > universe"
+    universe_data = get_field(data, "universe", dict, where)
+    check_keys(universe_data, {"size", "lookback_days"}, universe_where)
+    universe = UniverseConfig(size=get_field(universe_data, "size", int, universe_where),
+                              lookback_days=get_field(universe_data, "lookback_days", int, universe_where))
+    require(universe.size > 0, f"{universe_where} > size：必須大於 0")
+    require(universe.lookback_days > 0, f"{universe_where} > lookback_days：必須大於 0")
+
+    exchange_where = f"{where} > exchange"
+    exchange_data = get_field(data, "exchange", dict, where)
+    check_keys(exchange_data, _REQUEST_KEYS, exchange_where)
+    market = MarketConfig(
+        db_path=Path(get_field(data, "db_path", str, where)),
+        raw_dir=Path(get_field(data, "raw_dir", str, where)),
+        start=get_field(data, "start", date, where),
+        signal_start=get_field(data, "signal_start", date, where),
+        compare_start=get_field(data, "compare_start", date, where),
+        universe=universe,
+        output_dir=Path(get_field(data, "output_dir", str, where)),
+        check_dir=Path(get_field(data, "check_dir", str, where)),
+        exchange=RequestSettings(**_parse_request_settings(exchange_data, exchange_where)),
+    )
+    require(market.signal_start >= market.start, f"{where} > signal_start：不可早於 start")
+    require(market.compare_start >= market.signal_start, f"{where} > compare_start：不可早於 signal_start")
+    return market
 
 
 # --- watchlist.yaml ---------------------------------------------------------

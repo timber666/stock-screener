@@ -1,4 +1,4 @@
-# 研究功能的設定（RESEARCH_PLAN.md 第 5 節）。只有研究指令（events、signal-report）會讀取，
+# 研究功能的設定（RESEARCH_PLAN.md 第 5 節）。只有研究指令會讀取，
 # 寫錯時不影響每日的 update、scan（PROJECT_PLAN.md 10.4）。FinMind、Discord 的請求設定沿用 settings.yaml。
 events:                         # events 指令（除權息、減資、面額變更，PROJECT_PLAN.md 14.2）
   refetch_days: 7               # 已查過的股票，從上次查詢的迄日往前重疊幾天再查，補上較晚公告的資料
@@ -14,3 +14,19 @@ signal_report:                  # 訊號成績單：python -m screener signal-re
   top_n: 3                      # 本週表現最好、最差各列出幾個
   output_dir: data/research/signal_report     # 明細 CSV（不進版控）
   backtest_summary: data/backtest/summary.csv # M6 回測的統計，用來對照「M6 驗證段」；不存在時不顯示
+market:                         # 全市場資料（RESEARCH_PLAN.md 4.3）：market-update、market-check、--universe market
+  db_path: data/market.db       # 全市場日 K 與事件；每日系統不讀取（PROJECT_PLAN.md 10.4）
+  raw_dir: data/research/market_raw   # 證交所、櫃買中心的原始回應（壓縮檔），解析有誤時不必重新抓取
+  start: 2015-01-01             # 回補的起點（R8）
+  signal_start: 2015-07-01      # --universe market 的訊號起點：轉折點要 120 根計算區間，回補後約半年才完整
+  compare_start: 2021-01-01     # 與觀察清單並列的起點（觀察清單的日 K 從 2020-06 起）
+  universe:                     # 股票池（R7）：每月第一個交易日依平均成交金額排名
+    size: 500                   # 取前幾名
+    lookback_days: 60           # 平均成交金額的交易日數（不含當天；沒有成交的日子算 0）
+  output_dir: data/backtest/market        # backtest、trade-backtest --universe market 的輸出
+  check_dir: data/research/market_check   # market-check 的明細 CSV
+  exchange:                     # 證交所、櫃買中心的請求，兩邊各自計算間隔；頻率限制沒有公開
+    timeout_sec: 30
+    retry: 3
+    retry_backoff_sec: 30       # 第 n 次重試前等待 n × 此秒數
+    request_interval_sec: 5

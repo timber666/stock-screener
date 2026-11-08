@@ -4,7 +4,8 @@
 （D8、D34），對照組（D34）改用還原價。報酬一律以還原權息後的價格計算。
 
 掛牌（上市日／上櫃日）之前的興櫃交易沒有漲跌幅限制，掛牌後前五個交易日也沒有，這段期間不產生訊號、
-也不列入基準（D38）；K 棒仍用於計算均線與轉折點，與每日推播相同。
+也不列入基準（D38）；K 棒仍用於計算均線與轉折點，與每日推播相同。全市場的股票池每月更換（RESEARCH_PLAN.md
+4.3、R7）：不在當月股票池的日子同樣不產生訊號、不列入基準，K 棒照常用於計算。
 """
 
 from bisect import bisect_left, bisect_right
@@ -33,6 +34,7 @@ class StockHistory:
     adjusted: pd.DataFrame          # 還原權息後的日 K（成交量不調整）
     factors: pd.Series              # 每根 K 棒當天的調整因子，沒有事件為 1
     listed_on: date | None = None   # 上市日／上櫃日；None 表示不限制
+    in_universe: pd.Series | None = None    # 每根 K 棒是否在當月股票池內（全市場）；None 表示不限制
 
     @property
     def first_position(self) -> int:
@@ -41,6 +43,14 @@ class StockHistory:
             return 0
         listed = trading_day_index(list(self.bars.index), self.listed_on)
         return len(self.bars) if listed is None else listed + NO_PRICE_LIMIT_DAYS
+
+    def eligible(self) -> np.ndarray:
+        """每根 K 棒可否產生訊號、列入基準：掛牌後第六個交易日起，且在當月股票池內。"""
+        mask = np.zeros(len(self.bars), dtype=bool)
+        mask[self.first_position:] = True
+        if self.in_universe is not None:
+            mask &= self.in_universe.to_numpy(dtype=bool)
+        return mask
 
 
 def load_history(store: PriceStore, events: EventStore, info: StockInfo) -> StockHistory | None:
@@ -68,12 +78,15 @@ def find_signals(
     """start～end（含）每一天以該日 K 棒當作「今日」評估規則，回傳每個訊號一列。
 
     adjusted_rules 為 True 時以還原價判斷（D34 的對照組）。每個訊號只用到當天（含）以前的 K 棒。
-    掛牌後第六個交易日之前不產生訊號（D38）。
+    掛牌後第六個交易日之前（D38）與不在當月股票池的日子不產生訊號。
     """
     bars = history.adjusted if adjusted_rules else history.bars
     days = list(bars.index)
+    eligible = history.eligible()
     rows = []
     for i in range(max(bisect_left(days, start), history.first_position), bisect_right(days, end)):
+        if not eligible[i]:
+            continue
         ctx = build_context(history.info, bars.iloc[:i + 1], trend_config, is_tentative=False)
         for signal in engine.evaluate(ctx):
             rows.append({
@@ -129,11 +142,11 @@ def add_returns(rows: list[dict], history: StockHistory, horizons: Sequence[int]
 def forward_returns(history: StockHistory, horizons: Sequence[int]) -> pd.DataFrame:
     """每一天持有 N 日的報酬（%，還原權息，不分方向），索引為日期、欄位為 N；供計算基準。
 
-    與訊號相同，掛牌後第六個交易日之前不列入。
+    與訊號相同，掛牌後第六個交易日之前與不在當月股票池的日子不列入。
     """
     close = history.adjusted["close"]
     returns = pd.DataFrame({n: (close.shift(-n) / close - 1) * 100 for n in horizons})
-    return returns.iloc[history.first_position:]
+    return returns[history.eligible()]
 
 
 def dedupe(signals: pd.DataFrame, days: int) -> pd.Series:

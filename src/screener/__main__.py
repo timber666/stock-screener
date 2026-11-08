@@ -1,6 +1,6 @@
 """CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。
 
-研究指令（events、backtest、trade-backtest、signal-report）的程式在執行該指令時才匯入：每日排程的 update、scan
+研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
 """
 
@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from pathlib import Path
 
-from screener.config import (AppConfig, ConfigError, DiscordSettings, Secrets, load_backtest_config, load_config,
-                             load_research_config, load_rules, load_secrets)
+from screener.config import (AppConfig, ConfigError, DiscordSettings, ResearchConfig, Secrets, load_backtest_config,
+                             load_config, load_research_config, load_rules, load_secrets)
 from screener.jobs import JobFailed, analyze, daily_update, intraday_scan
 from screener.logging_setup import setup_logging
 from screener.notify.base import Notifier, NotifyError
@@ -90,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="改用另一份規則檔回測，不影響每日推播（預設為 config/rules.yaml）")
     backtest_parser.add_argument("--rules", type=_parse_ids, metavar="ID,ID",
                                  help="只回測指定的觸發規則 id，以逗號分隔")
+    _add_universe(backtest_parser)
 
     trade_parser = commands.add_parser(
         "trade-backtest",
@@ -103,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     trade_parser.add_argument("--pick", metavar="PICK", help="驗證段使用的挑選方式，例：nearest_ma、volume_ratio")
     trade_parser.add_argument("--rules-file", type=Path, metavar="PATH",
                               help="改用另一份規則檔，不影響每日推播（預設為 config/rules.yaml）")
+    _add_universe(trade_parser)
 
     report_parser = commands.add_parser(
         "signal-report",
@@ -113,6 +115,23 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--end", type=_parse_date, metavar="YYYY-MM-DD",
                                help="期間的最後一天，期間為該週的週一到這一天（預設為上一週的週五）")
     report_parser.add_argument("--dry-run", action="store_true", help="只印在終端，不推播")
+
+    market_parser = commands.add_parser(
+        "market-update",
+        help="全市場資料：補抓證交所、櫃買中心的每日行情與事件到 market.db（研究使用）",
+        description="補抓上市、上櫃普通股的每日行情、報酬指數、除權息與減資到 market.db（設定在 config/research.yaml 的 "
+                    "market）。第一次從期間起點開始回補，中斷後重新執行會從中斷處繼續；只抓到昨天。",
+    )
+    market_parser.add_argument("--start", type=_parse_date, metavar="YYYY-MM-DD",
+                               help="只查詢這一天以後（預設為 research.yaml 的 market.start）")
+    market_parser.add_argument("--end", type=_parse_date, metavar="YYYY-MM-DD", help="只查詢到這一天（預設為昨天）")
+
+    commands.add_parser(
+        "market-check",
+        help="全市場資料的品質報告（研究使用）",
+        description="檢查 market.db：與 screener.db 重疊的價格、除權息與減資、報酬指數、異常值、下市與轉上市，"
+                    "終端印出摘要，明細寫成 CSV（research.yaml 的 market.check_dir）。",
+    )
 
     analyze_parser = commands.add_parser(
         "analyze",
@@ -127,6 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="以該日日 K 當作「今日」（預設為資料庫最後一筆）",
     )
     return parser
+
+
+def _add_universe(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--universe", choices=("watchlist", "market"), default="watchlist",
+                        help="watchlist：觀察清單（預設）；market：全市場的動態股票池（market.db，"
+                             "設定在 research.yaml 的 market），並與觀察清單並列")
 
 
 def _parse_ids(value: str) -> list[str]:
@@ -198,25 +223,41 @@ def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets,
 
         signal_report.run(config, load_research_config(args.config_dir / "research.yaml"), end=args.end,
                           notifier=notifier)
+    elif args.command == "market-update":
+        from screener.jobs import market_update
+
+        market_update.run(config, load_research_config(args.config_dir / "research.yaml"), secrets,
+                          start=args.start, end=args.end)
+    elif args.command == "market-check":
+        from screener.jobs import market_check
+
+        market_check.run(config, load_research_config(args.config_dir / "research.yaml"))
     elif args.command == "trade-backtest":
         from screener.jobs import trade_backtest    # 需要研究套件 plotly
 
         rules_file = args.rules_file or args.config_dir / "rules.yaml"
         trade_backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
                            rules=load_rules(rules_file), rules_label=str(rules_file), validate=args.validate,
-                           max_positions=args.max_positions, pick=args.pick)
+                           max_positions=args.max_positions, pick=args.pick, universe=args.universe,
+                           research=_market_research(args))
     else:
         from screener.jobs import backtest      # 需要研究套件 plotly
 
         rules_file = args.rules_file or args.config_dir / "rules.yaml"
         backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
                      rules=load_rules(rules_file), rules_label=str(rules_file), rule_ids=args.rules,
-                     start=args.start, end=args.end, horizon=args.horizon)
+                     start=args.start, end=args.end, horizon=args.horizon, universe=args.universe,
+                     research=_market_research(args))
+
+
+def _market_research(args: argparse.Namespace) -> ResearchConfig | None:
+    """--universe market 才需要 research.yaml（market 區塊）。"""
+    return load_research_config(args.config_dir / "research.yaml") if args.universe == "market" else None
 
 
 def _notifier(args: argparse.Namespace, settings: DiscordSettings, secrets: Secrets) -> Notifier | None:
     """scan 推播結果與錯誤通知；update 只推錯誤通知（D30）；signal-report 的結果與錯誤通知都推到研究頻道（D43）；
-    其餘指令與 --dry-run 不推播。"""
+    market-update（每週排程，R9）只把錯誤通知推到研究頻道，未設定時只記錄在 log；其餘指令與 --dry-run 不推播。"""
     if args.command == "signal-report":
         if args.dry_run:
             return None
@@ -224,6 +265,13 @@ def _notifier(args: argparse.Namespace, settings: DiscordSettings, secrets: Secr
             raise ConfigError("未設定 DISCORD_RESEARCH_WEBHOOK_URL（.env），無法推播成績單；"
                               "只要在終端查看請加上 --dry-run")
         return DiscordWebhook(settings, secrets.discord_research_webhook_url, env_name="DISCORD_RESEARCH_WEBHOOK_URL")
+
+    if args.command == "market-update":
+        if secrets.discord_research_webhook_url:
+            return DiscordWebhook(settings, secrets.discord_research_webhook_url,
+                                  env_name="DISCORD_RESEARCH_WEBHOOK_URL")
+        logger.warning("未設定 DISCORD_RESEARCH_WEBHOOK_URL（.env），失敗時不會推送錯誤通知")
+        return None
 
     pushes_results = args.command == "scan" and not args.dry_run
     if not (pushes_results or args.command == "update"):
@@ -245,6 +293,8 @@ def _notify_failure(notifier: Notifier | None, args: argparse.Namespace, started
         job = "盤後更新"
     elif args.command == "signal-report":
         job = "訊號成績單"
+    elif args.command == "market-update":
+        job = "全市場資料更新"
     else:
         job = f"回放 {args.replay}" if args.replay else "盤中選股"
     title = f"{job}執行失敗（{started_at:%Y-%m-%d %H:%M}）"

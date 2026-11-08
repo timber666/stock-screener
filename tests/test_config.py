@@ -1,4 +1,5 @@
 import copy
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -227,6 +228,11 @@ def test_repo_research_config_loads() -> None:
     assert research.signal_report.top_n == 3
     assert research.signal_report.output_dir == Path("data/research/signal_report")
     assert research.signal_report.backtest_summary == Path("data/backtest/summary.csv")
+    market = research.market
+    assert (market.db_path, market.start, market.signal_start, market.compare_start) == (
+        Path("data/market.db"), date(2015, 1, 1), date(2015, 7, 1), date(2021, 1, 1))
+    assert (market.universe.size, market.universe.lookback_days) == (500, 60)       # R7
+    assert market.exchange.request_interval_sec == 5.0
 
 
 @pytest.mark.parametrize(
@@ -240,6 +246,12 @@ def test_repo_research_config_loads() -> None:
         ("signal_report", "horizons", [5, 1], "signal_report > horizons：應由小到大且不重複"),
         ("signal_report", "horizons", [], "signal_report > horizons：應為正整數陣列"),
         ("signal_report", "top_n", -1, "signal_report > top_n：不可為負數"),
+        ("market", "signal_start", date(2014, 12, 31), "market > signal_start：不可早於 start"),
+        ("market", "compare_start", date(2015, 6, 30), "market > compare_start：不可早於 signal_start"),
+        ("market", "universe", {"size": 0, "lookback_days": 60}, "market > universe > size：必須大於 0"),
+        ("market", "universe", {"size": 500}, "market > universe：缺少必要欄位 `lookback_days`"),
+        ("market", "exchange", {"timeout_sec": 30}, "market > exchange：缺少必要欄位"),
+        ("market", "start", "2015-01-01x", "market > start：應為日期"),
     ],
 )
 def test_invalid_research_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
