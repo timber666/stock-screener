@@ -78,3 +78,14 @@ factors:                        # 單因子研究：python -m screener factor-re
     - { id: dy, kind: dividend_yield, params: {} }
     - { id: size, kind: size, params: {} }
     - { id: turnover_60, kind: share_turnover, params: { days: 60 } }
+portfolio:                      # 組合回測與模擬組合：portfolio-backtest、portfolio-track（RESEARCH_PLAN.md 4.6）
+  initial_capital: 300000       # 初始資金（元）；觀察段、驗證段與模擬組合各自從這個金額開始
+  factors: [rev_yoy, rev_accel, bp, dy]   # 候選因子（R30），只依觀察段選出
+  top_n: [10, 20]               # 持股檔數，各跑一次（R32）
+  picks: [top_factor, top_value]    # 挑法：因子值最高、最高組內平均成交金額最大
+  liquidity_factor: adv_60      # top_value 排序用的因子
+  random_runs: 100              # 最高組隨機 N 檔跑幾次，列出中位數與 5%～95% 範圍（R35）
+  random_seed: 42               # 固定種子，重跑結果相同
+  output_dir: data/research/portfolio   # observe/、validate/ 底下各有 summary.csv、trades.csv、equity.csv、report.html
+  paper_db_path: data/research/paper_portfolio.db   # 模擬組合的狀態；每日系統不讀取（PROJECT_PLAN.md 10.4）
+  track: { factor: dy, top_n: 10, pick: top_value }   # 模擬組合追蹤的一組，必須是回測比較過的組合（R36、R38）

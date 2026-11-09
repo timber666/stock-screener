@@ -239,6 +239,12 @@ def test_repo_research_config_loads() -> None:
     assert (factors.horizons, factors.decay_horizons, factors.quantiles) == ((1, 5, 20), (1, 2, 3, 5, 10, 20), 5)
     assert factors.summary_horizon == 5 and factors.output_dir == Path("data/research/factors")
     assert {d.id for d in factors.definitions} >= {"mom_12_1", "ma5_gap", "trend", "rev_yoy", "ep"}
+    portfolio = research.portfolio
+    assert (portfolio.factors, portfolio.top_n, portfolio.picks) == (
+        ("rev_yoy", "rev_accel", "bp", "dy"), (10, 20), ("top_factor", "top_value"))    # R30、R32
+    assert (portfolio.initial_capital, portfolio.random_runs, portfolio.liquidity_factor) == (300000.0, 100, "adv_60")
+    assert portfolio.paper_db_path == Path("data/research/paper_portfolio.db")
+    assert (portfolio.track.factor, portfolio.track.top_n, portfolio.track.pick) == ("dy", 10, "top_value")     # R38
 
 
 @pytest.mark.parametrize(
@@ -271,6 +277,19 @@ def test_repo_research_config_loads() -> None:
         ("factors", "definitions", [{"id": "a", "kind": "b"}], "definitions 第 1 項：缺少必要欄位 `params`"),
         ("factors", "definitions", [{"id": "a", "kind": "b", "params": {}}, {"id": "a", "kind": "c", "params": {}}],
          "factors > definitions：id 重複"),
+        ("portfolio", "factors", [], "portfolio > factors：至少要有一個因子"),
+        ("portfolio", "factors", ["nope"], "portfolio > factors：'nope' 不在 factors.definitions"),
+        ("portfolio", "factors", ["bp", "bp"], "portfolio > factors：不可重複"),
+        ("portfolio", "top_n", [20, 10], "portfolio > top_n：應由小到大且不重複"),
+        ("portfolio", "top_n", [0], "portfolio > top_n：應為正整數陣列"),
+        ("portfolio", "picks", ["other"], "portfolio > picks：應為 top_factor、top_value 其中之一且不重複"),
+        ("portfolio", "liquidity_factor", "nope", "portfolio > liquidity_factor：'nope' 不在 factors.definitions"),
+        ("portfolio", "initial_capital", 0, "portfolio > initial_capital：必須大於 0"),
+        ("portfolio", "random_runs", -1, "portfolio > random_runs：不可為負數"),
+        ("portfolio", "track", [], "portfolio > track：應為 key: value 結構或 null"),
+        ("portfolio", "track", {"factor": "ep", "top_n": 10, "pick": "top_value"}, "portfolio > track > factor：應為 portfolio.factors 其中之一"),
+        ("portfolio", "track", {"factor": "bp", "top_n": 30, "pick": "top_value"}, "portfolio > track > top_n：應為 portfolio.top_n 其中之一"),
+        ("portfolio", "track", {"factor": "bp", "top_n": 10, "pick": "x"}, "portfolio > track > pick：應為 portfolio.picks 其中之一"),
     ],
 )
 def test_invalid_research_setting_is_rejected(config_dir: Path, section: str, key: str, value: Any,
@@ -278,6 +297,21 @@ def test_invalid_research_setting_is_rejected(config_dir: Path, section: str, ke
     edit_yaml(config_dir / "research.yaml", lambda d: d[section].update({key: value}))
 
     with pytest.raises(ConfigError, match=message):
+        load_research_config(config_dir / "research.yaml")
+
+
+def test_portfolio_track_accepts_a_compared_combination(config_dir: Path) -> None:
+    edit_yaml(config_dir / "research.yaml",
+              lambda d: d["portfolio"].update({"track": {"factor": "rev_yoy", "top_n": 20, "pick": "top_value"}}))
+
+    track = load_research_config(config_dir / "research.yaml").portfolio.track
+    assert (track.factor, track.top_n, track.pick) == ("rev_yoy", 20, "top_value")
+
+
+def test_portfolio_track_must_be_written_even_when_not_selected(config_dir: Path) -> None:
+    edit_yaml(config_dir / "research.yaml", lambda d: d["portfolio"].pop("track"))
+
+    with pytest.raises(ConfigError, match="portfolio > track：缺少必要欄位"):
         load_research_config(config_dir / "research.yaml")
 
 

@@ -255,6 +255,12 @@ class SqliteMarketStore:
             " ORDER BY start", [OK, *sources]).fetchall()
         return [date.fromisoformat(d) for (d,) in rows]
 
+    def covered_through(self) -> date | None:
+        """兩個市場都查詢過的最後一天（含休市日）；還沒有任何紀錄時為 None。"""
+        rows = self._conn.execute("SELECT source, MAX(start) FROM fetch_log WHERE source IN ('tse_daily', 'otc_daily')"
+                                  " GROUP BY source").fetchall()
+        return min(date.fromisoformat(last) for _, last in rows) if len(rows) == len(Market) else None
+
     def calendar(self) -> list[date]:
         return [date.fromisoformat(d) for (d,) in self._conn.execute("SELECT date FROM trading_calendar ORDER BY date")]
 

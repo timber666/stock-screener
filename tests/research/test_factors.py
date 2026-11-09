@@ -41,7 +41,7 @@ def make_panel(closes: dict[str, list[float]], *, index: pd.Index | None = None,
         return pd.DataFrame({code: column for code in close.columns}, index=index, dtype=float)
 
     flags = pd.DataFrame(False, index=index, columns=close.columns)
-    return Panel(open=frame(opens), high=frame(highs), low=frame(lows), close=close, raw_close=frame(raw),
+    return Panel(open=frame(opens), high=frame(highs), low=frame(lows), close=close, raw_close=frame(raw), raw_open=frame(raw), reference=frame(raw),
                  volume=frame(volumes), value=frame(values), eligible=close.notna(), limit_up=flags, limit_down=flags)
 
 

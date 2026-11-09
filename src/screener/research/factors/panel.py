@@ -30,6 +30,8 @@ class Panel:
     eligible: pd.DataFrame          # 當天可以列入研究：當月股票池內、掛牌第六個交易日起（D38）、當天有成交
     limit_up: pd.DataFrame          # 當天收在漲停價
     limit_down: pd.DataFrame        # 當天收在跌停價
+    raw_open: pd.DataFrame          # 未還原開盤：判斷開盤漲跌停、計算股數（M10）
+    reference: pd.DataFrame         # 參考價 = 前一根 K 棒的收盤 × 當天的調整因子（M10）
 
     @property
     def days(self) -> pd.Index:
@@ -44,12 +46,14 @@ def build_panel(histories: Sequence[StockHistory], values: pd.DataFrame) -> Pane
     """histories：曾經入選股票池的股票（market.history）；values：成交金額，索引為全部交易日、欄位為代號。"""
     days = values.index
     frames: dict[str, dict[str, pd.Series]] = {column: {} for column in ADJUSTED_COLUMNS}
-    raw_closes, volumes, eligibles, ups, downs = {}, {}, {}, {}, {}
+    raw_closes, raw_opens, references, volumes, eligibles, ups, downs = {}, {}, {}, {}, {}, {}, {}
     for history in histories:
         code = history.info.code
         for column in ADJUSTED_COLUMNS:
             frames[column][code] = history.adjusted[column]
         raw_closes[code] = history.bars["close"]
+        raw_opens[code] = history.bars["open"]
+        references[code] = history.bars["close"].shift(1) * history.factors
         volumes[code] = history.bars["volume"].astype(float)
         eligible = history.eligible()
         eligibles[code] = pd.Series(eligible, index=history.bars.index, dtype=bool)
@@ -69,11 +73,11 @@ def build_panel(histories: Sequence[StockHistory], values: pd.DataFrame) -> Pane
     return Panel(open=wide(frames["open"]), high=wide(frames["high"]), low=wide(frames["low"]),
                  close=wide(frames["close"]), raw_close=wide(raw_closes), volume=wide(volumes),
                  value=subset.fillna(0.0).where(first_seen), eligible=flag(eligibles), limit_up=flag(ups),
-                 limit_down=flag(downs))
+                 limit_down=flag(downs), raw_open=wide(raw_opens), reference=wide(references))
 
 
 @lru_cache(maxsize=None)
-def _limits(reference: float) -> tuple[float, float]:
+def cached_limits(reference: float) -> tuple[float, float]:
     return limit_prices(reference)
 
 
@@ -83,7 +87,7 @@ def _limit_flags(closes: np.ndarray, factors: np.ndarray, eligible: np.ndarray) 
     for i in np.flatnonzero(eligible):
         if i == 0:
             continue
-        limit_up, limit_down = _limits(float(closes[i - 1] * factors[i]))
+        limit_up, limit_down = cached_limits(float(closes[i - 1] * factors[i]))
         close = normalize(closes[i])
         up[i] = close == normalize(limit_up)
         down[i] = close == normalize(limit_down)

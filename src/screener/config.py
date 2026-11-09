@@ -211,6 +211,36 @@ class FactorsConfig:
     definitions: tuple[FactorDefinition, ...]
 
 
+TOP_FACTOR = "top_factor"           # 因子值最高的 N 檔
+TOP_VALUE = "top_value"             # 最高組內平均成交金額最大的 N 檔
+PORTFOLIO_PICKS = (TOP_FACTOR, TOP_VALUE)
+
+
+@dataclass(frozen=True)
+class PaperPortfolio:
+    """模擬組合追蹤的一組（RESEARCH_PLAN.md 4.6、R36）。"""
+
+    factor: str
+    top_n: int
+    pick: str
+
+
+@dataclass(frozen=True)
+class PortfolioConfig:
+    """組合回測與模擬組合（RESEARCH_PLAN.md 4.6）。"""
+
+    initial_capital: float          # 初始資金（元）；觀察段、驗證段與模擬組合各自從這個金額開始
+    factors: tuple[str, ...]        # 候選因子（R30），必須是 factors.definitions 的 id
+    top_n: tuple[int, ...]          # 持股檔數（R32），各跑一次
+    picks: tuple[str, ...]          # 挑法（PORTFOLIO_PICKS）
+    liquidity_factor: str           # top_value 排序用的因子
+    random_runs: int                # 最高組隨機 N 檔跑幾次
+    random_seed: int
+    output_dir: Path
+    paper_db_path: Path             # 模擬組合的狀態，每日系統不讀取（PROJECT_PLAN.md 10.4）
+    track: PaperPortfolio | None    # 使用者看完回測後選定；None 時 portfolio-track 無法執行
+
+
 @dataclass(frozen=True)
 class ResearchConfig:
     """research.yaml：只有研究指令會載入（PROJECT_PLAN.md 10.4）。"""
@@ -220,6 +250,7 @@ class ResearchConfig:
     signal_report: SignalReportConfig
     market: MarketConfig
     factors: FactorsConfig
+    portfolio: PortfolioConfig
 
 
 @dataclass(frozen=True)
@@ -468,7 +499,7 @@ def load_research_config(path: Path) -> ResearchConfig:
     """只有研究指令會載入，寫錯時不影響每日的掃描與更新（PROJECT_PLAN.md 10.4）。"""
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"events", "isin", "signal_report", "market", "factors"}, where)
+    check_keys(data, {"events", "isin", "signal_report", "market", "factors", "portfolio"}, where)
 
     events_where = f"{where} > events"
     events_data = get_field(data, "events", dict, where)
@@ -499,7 +530,62 @@ def load_research_config(path: Path) -> ResearchConfig:
     require(signal_report.top_n >= 0, f"{report_where} > top_n：不可為負數")
     market = _parse_market(get_field(data, "market", dict, where), f"{where} > market")
     factors = _parse_factors(get_field(data, "factors", dict, where), f"{where} > factors")
-    return ResearchConfig(events=events, isin=isin, signal_report=signal_report, market=market, factors=factors)
+    portfolio = _parse_portfolio(get_field(data, "portfolio", dict, where), f"{where} > portfolio", factors)
+    return ResearchConfig(events=events, isin=isin, signal_report=signal_report, market=market, factors=factors,
+                          portfolio=portfolio)
+
+
+def _parse_portfolio(data: Mapping[str, Any], where: str, factors: FactorsConfig) -> PortfolioConfig:
+    check_keys(data, {"initial_capital", "factors", "top_n", "picks", "liquidity_factor", "random_runs", "random_seed",
+                      "output_dir", "paper_db_path", "track"}, where)
+    defined = {definition.id for definition in factors.definitions}
+    candidates = get_field(data, "factors", list, where)
+    require(bool(candidates), f"{where} > factors：至少要有一個因子")
+    require(len(set(candidates)) == len(candidates), f"{where} > factors：不可重複")
+    for factor in candidates:
+        require(factor in defined, f"{where} > factors：{factor!r} 不在 factors.definitions")
+    top_n = get_field(data, "top_n", list, where)
+    require(bool(top_n) and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in top_n),
+            f"{where} > top_n：應為正整數陣列")
+    require(top_n == sorted(set(top_n)), f"{where} > top_n：應由小到大且不重複")
+    picks = get_field(data, "picks", list, where)
+    require(bool(picks) and all(pick in PORTFOLIO_PICKS for pick in picks) and len(set(picks)) == len(picks),
+            f"{where} > picks：應為 {'、'.join(PORTFOLIO_PICKS)} 其中之一且不重複")
+    liquidity = get_field(data, "liquidity_factor", str, where)
+    require(liquidity in defined, f"{where} > liquidity_factor：{liquidity!r} 不在 factors.definitions")
+    portfolio = PortfolioConfig(
+        initial_capital=get_field(data, "initial_capital", float, where),
+        factors=tuple(candidates),
+        top_n=tuple(top_n),
+        picks=tuple(picks),
+        liquidity_factor=liquidity,
+        random_runs=get_field(data, "random_runs", int, where),
+        random_seed=get_field(data, "random_seed", int, where),
+        output_dir=Path(get_field(data, "output_dir", str, where)),
+        paper_db_path=Path(get_field(data, "paper_db_path", str, where)),
+        track=_parse_track(data, f"{where} > track", candidates, top_n, picks),
+    )
+    require(portfolio.initial_capital > 0, f"{where} > initial_capital：必須大於 0")
+    require(portfolio.random_runs >= 0, f"{where} > random_runs：不可為負數")
+    return portfolio
+
+
+def _parse_track(data: Mapping[str, Any], where: str, factors: list[str], top_n: list[int],
+                 picks: list[str]) -> PaperPortfolio | None:
+    """追蹤的一組必須是回測比較過的組合（D32）；尚未選定時寫 null。"""
+    if "track" not in data:
+        raise ConfigError(f"{where}：缺少必要欄位；尚未選定時寫 null")
+    if data["track"] is None:
+        return None
+    require(isinstance(data["track"], dict), f"{where}：應為 key: value 結構或 null")
+    check_keys(data["track"], {"factor", "top_n", "pick"}, where)
+    track = PaperPortfolio(factor=get_field(data["track"], "factor", str, where),
+                           top_n=get_field(data["track"], "top_n", int, where),
+                           pick=get_field(data["track"], "pick", str, where))
+    require(track.factor in factors, f"{where} > factor：應為 portfolio.factors 其中之一")
+    require(track.top_n in top_n, f"{where} > top_n：應為 portfolio.top_n 其中之一")
+    require(track.pick in picks, f"{where} > pick：應為 portfolio.picks 其中之一")
+    return track
 
 
 def _parse_factors(data: Mapping[str, Any], where: str) -> FactorsConfig:

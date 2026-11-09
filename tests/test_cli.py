@@ -35,7 +35,8 @@ def test_help_runs_as_module() -> None:
 
 RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screener.jobs.backtest",
                     "screener.jobs.trade_backtest", "screener.jobs.corporate_events", "screener.jobs.signal_report",
-                    "screener.jobs.market_update", "screener.jobs.market_check", "screener.jobs.factor_report")
+                    "screener.jobs.market_update", "screener.jobs.market_check", "screener.jobs.factor_report",
+                    "screener.jobs.portfolio_backtest", "screener.jobs.portfolio_track")
 
 _LOADED_RESEARCH_MODULES = """
 import sys
@@ -508,6 +509,48 @@ def test_market_check_without_database_fails_quietly(config_dir: Path, both_webh
 
     assert "找不到" in read_log(config_dir) and "請先執行 market-update" in read_log(config_dir)
     assert both_webhooks.sent == []                     # 手動執行的報告，不推播
+
+
+# --- portfolio-backtest、portfolio-track（RESEARCH_PLAN.md 4.6）----------------------
+
+def test_portfolio_backtest_validate_needs_selected_combination(config_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--config-dir", str(config_dir), "portfolio-backtest", "--validate"]) == EXIT_CONFIG_ERROR
+    assert "只檢查在觀察段選定的一組" in read_log(config_dir)
+
+
+def test_portfolio_track_without_research_webhook_exits_with_config_error(config_dir: Path,
+                                                                          webhook: type[FakeWebhook]) -> None:
+    # 只有每日頻道的 webhook：模擬組合不可以推到每日頻道
+    assert main(["--config-dir", str(config_dir), "portfolio-track"]) == EXIT_CONFIG_ERROR
+
+    assert "未設定 DISCORD_RESEARCH_WEBHOOK_URL" in read_log(config_dir) and "模擬組合" in read_log(config_dir)
+    assert webhook.sent == []
+
+
+def test_portfolio_track_failure_is_notified_in_research_channel(config_dir: Path,
+                                                                 both_webhooks: type[RecordingWebhook]) -> None:
+    edit = read_yaml(config_dir / "research.yaml")
+    edit["portfolio"]["track"] = {"factor": "rev_yoy", "top_n": 20, "pick": "top_value"}
+    write_yaml(config_dir / "research.yaml", edit)
+
+    assert main(["--config-dir", str(config_dir), "portfolio-track"]) == EXIT_FAILED      # market.db 不存在
+
+    ((url, message),) = both_webhooks.sent
+    assert url == RESEARCH_WEBHOOK_URL
+    assert message.startswith("❌ 模擬組合執行失敗（") and "請先執行 market-update" in message
+
+
+def test_portfolio_track_without_selection_exits_with_config_error(config_dir: Path,
+                                                                   both_webhooks: type[RecordingWebhook]) -> None:
+    edit = read_yaml(config_dir / "research.yaml")
+    edit["portfolio"]["track"] = None
+    write_yaml(config_dir / "research.yaml", edit)
+
+    assert main(["--config-dir", str(config_dir), "portfolio-track"]) == EXIT_CONFIG_ERROR
+
+    ((url, message),) = both_webhooks.sent
+    assert url == RESEARCH_WEBHOOK_URL
+    assert "track 尚未選定" in message
 
 
 def test_dry_run_never_uses_webhook(config_dir: Path, webhook: type[FakeWebhook]) -> None:

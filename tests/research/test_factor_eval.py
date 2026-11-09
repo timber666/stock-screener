@@ -19,7 +19,7 @@ def make_panel(closes: dict[str, list[float]], opens: dict[str, list[float]] | N
     close = pd.DataFrame(closes, index=days, dtype=float)
     open_ = pd.DataFrame(opens, index=days, dtype=float) if opens else close.copy()
     flags = pd.DataFrame(False, index=days, columns=close.columns)
-    return Panel(open=open_, high=close, low=close, close=close, raw_close=close, volume=close, value=close,
+    return Panel(open=open_, high=close, low=close, close=close, raw_close=close, raw_open=close, reference=close, volume=close, value=close,
                  eligible=close.notna(), limit_up=flags, limit_down=flags)
 
 

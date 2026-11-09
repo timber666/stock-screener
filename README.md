@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M0–M9（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
+> 🚧 開發中：已完成 M0–M10（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)。
 
 ## 架構
 
@@ -73,6 +73,8 @@ python -m screener --help
 | `python -m screener market-update` | 全市場資料：補抓證交所、櫃買中心的每日行情與事件到 `data/market.db`（研究使用）；`--start`、`--end` 只抓指定期間 |
 | `python -m screener market-check` | 全市場資料的品質報告：與 `screener.db` 重疊的價格、除權息與減資、報酬指數、異常值、下市與轉上市、基本面資料的涵蓋範圍 |
 | `python -m screener factor-report` | 單因子研究：Rank IC、分位數報酬、換手率、衰減、產業中性前後，觀察段與驗證段分列；`--factors` 只跑指定的因子 |
+| `python -m screener portfolio-backtest` | 組合回測：每月依因子換股、模擬 30 萬元的帳戶；預設跑觀察段的全部組合，`--validate --factor --top-n --pick` 只檢查選定的一組在驗證段的結果 |
+| `python -m screener portfolio-track` | 模擬組合（不下單）：換股週結算上一次的名單、產生新名單並推播到研究頻道，其他週直接結束；`--dry-run` 只印在終端 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
 
@@ -99,7 +101,7 @@ python -m screener --help
 powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 ```
 
-註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00），以及兩個每週六的研究工作：`stock-screener-market`（09:00，`market-update`）與 `stock-screener-weekly`（10:00，`signal-report`）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00 -WeeklyTime 09:00 -MarketTime 08:00` 調整，`-Unregister` 移除。
+註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00），以及三個每週六的研究工作：`stock-screener-market`（09:00，`market-update`）、`stock-screener-portfolio`（09:30，`portfolio-track`）與 `stock-screener-weekly`（10:00，`signal-report`）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00 -WeeklyTime 09:00 -MarketTime 08:00 -PortfolioTime 09:45` 調整，`-Unregister` 移除。
 
 - 以目前使用者身分執行，電腦須開機且已登入；執行時會出現命令列視窗。
 - 錯過的 update、weekly、market（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
@@ -196,6 +198,18 @@ python -m screener factor-report --factors ep,mom_12_1   # 只跑指定的因子
 - 因子清單在 `config/research.yaml` 的 `factors.definitions`：動能、短期反轉、波動、流動性、現有規則的分數（站上均線的程度、量比、長紅長黑、距前高前低、均線排列、趨勢標籤）、月營收、本益比與淨值比、規模、週轉率。新增因子只要寫一個函式並以 `@register_factor` 註冊。
 - 指標：Rank IC、ICIR、t 值（每 h 天取一次）、5 組的分位數報酬（另列排除當天收漲跌停）、換手率與扣成本後的超額、1～20 日的 IC 衰減、產業中性前後的比較。觀察段與驗證段分列；只用當時可得的資料（月營收在次月 10 日之後才能用，產業別用當時的分類）。
 - 輸出：終端摘要，以及 `data/research/factors/` 的 `summary.csv`、`ic.csv`、`decay.csv`、`groups.csv` 與 `report.html`。
+
+### 組合回測與模擬組合（`portfolio-backtest`、`portfolio-track`）
+
+把因子做成每月換股的組合，扣掉實際成本、處理買不到（開盤漲停）與賣不掉（開盤跌停）之後，模擬 30 萬元的帳戶，與報酬指數、股票池等權、最高組隨機挑選比較。規格見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.6。
+
+```bash
+python -m screener portfolio-backtest                                                # 觀察段：全部組合
+python -m screener portfolio-backtest --validate --factor rev_yoy --top-n 20 --pick top_value   # 驗證段：只檢查選定的一組
+python -m screener portfolio-track --dry-run                                         # 模擬組合：只印在終端
+```
+
+輸出到 `data/research/portfolio/`（`summary.csv`、`trades.csv`、`equity.csv`、`report.html`）。模擬組合要先在 `config/research.yaml` 的 `portfolio.track` 選定一組；狀態存在 `data/research/paper_portfolio.db`。研究結果只描述統計，不構成投資建議。
 
 ### 全市場資料（`market-update`、`market-check`、`--universe market`）
 

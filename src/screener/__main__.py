@@ -1,6 +1,7 @@
 """CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。
 
-研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check、factor-report）的程式在執行該指令時才匯入：每日排程的 update、scan
+研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check、factor-report、portfolio-backtest、
+portfolio-track）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
 """
 
@@ -141,6 +142,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     factor_parser.add_argument("--factors", type=_parse_ids, metavar="ID,ID", help="只跑指定的因子 id，以逗號分隔")
 
+    portfolio_parser = commands.add_parser(
+        "portfolio-backtest",
+        help="組合回測：每月依因子換股，模擬一個帳戶（研究使用）",
+        description="以全市場的動態股票池，每月依因子換股、模擬 30 萬元的帳戶，比較持股檔數與挑法（設定在 config/research.yaml "
+                    "的 portfolio）。預設只跑觀察段；選定一組後加 --validate 檢查它在驗證段的結果。需先執行 market-update。",
+    )
+    portfolio_parser.add_argument("--validate", action="store_true",
+                                  help="只跑驗證段，需同時指定 --factor、--top-n 與 --pick（只檢查觀察段選定的一組）")
+    portfolio_parser.add_argument("--factor", metavar="ID", help="驗證段使用的因子，例：rev_yoy")
+    portfolio_parser.add_argument("--top-n", type=int, metavar="N", help="驗證段使用的持股檔數")
+    portfolio_parser.add_argument("--pick", metavar="PICK", help="驗證段使用的挑法，例：top_factor、top_value")
+
+    track_parser = commands.add_parser(
+        "portfolio-track",
+        help="模擬組合：換股週產生名單並推播到研究頻道，不下單（研究使用）",
+        description="結算上一次的名單、產生新名單並推播到研究頻道（DISCORD_RESEARCH_WEBHOOK_URL）；不是換股週就直接結束"
+                    "（設定在 config/research.yaml 的 portfolio.track）。需先執行 market-update。",
+    )
+    track_parser.add_argument("--dry-run", action="store_true", help="只印在終端，不寫入、不推播")
+
     analyze_parser = commands.add_parser(
         "analyze",
         help="輸出指定股票的轉折點與趨勢",
@@ -245,6 +266,17 @@ def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets,
 
         factor_report.run(config, load_research_config(args.config_dir / "research.yaml"),
                           load_backtest_config(args.config_dir / "backtest.yaml"), factor_ids=args.factors)
+    elif args.command == "portfolio-backtest":
+        from screener.jobs import portfolio_backtest    # 需要研究套件 plotly
+
+        portfolio_backtest.run(config, load_research_config(args.config_dir / "research.yaml"),
+                               load_backtest_config(args.config_dir / "backtest.yaml"), validate=args.validate,
+                               factor=args.factor, top_n=args.top_n, pick=args.pick)
+    elif args.command == "portfolio-track":
+        from screener.jobs import portfolio_track       # 需要研究套件 plotly
+
+        portfolio_track.run(config, load_research_config(args.config_dir / "research.yaml"),
+                            load_backtest_config(args.config_dir / "backtest.yaml"), notifier=notifier)
     elif args.command == "trade-backtest":
         from screener.jobs import trade_backtest    # 需要研究套件 plotly
 
@@ -270,12 +302,13 @@ def _market_research(args: argparse.Namespace) -> ResearchConfig | None:
 
 def _notifier(args: argparse.Namespace, settings: DiscordSettings, secrets: Secrets) -> Notifier | None:
     """scan 推播結果與錯誤通知；update 只推錯誤通知（D30）；signal-report 的結果與錯誤通知都推到研究頻道（D43）；
-    market-update（每週排程，R9）只把錯誤通知推到研究頻道，未設定時只記錄在 log；其餘指令與 --dry-run 不推播。"""
-    if args.command == "signal-report":
+    portfolio-track 同 signal-report；market-update（每週排程，R9）只把錯誤通知推到研究頻道，未設定時只記錄在 log；其餘指令與 --dry-run 不推播。"""
+    if args.command in ("signal-report", "portfolio-track"):
         if args.dry_run:
             return None
         if not secrets.discord_research_webhook_url:
-            raise ConfigError("未設定 DISCORD_RESEARCH_WEBHOOK_URL（.env），無法推播成績單；"
+            what = "成績單" if args.command == "signal-report" else "模擬組合"
+            raise ConfigError(f"未設定 DISCORD_RESEARCH_WEBHOOK_URL（.env），無法推播{what}；"
                               "只要在終端查看請加上 --dry-run")
         return DiscordWebhook(settings, secrets.discord_research_webhook_url, env_name="DISCORD_RESEARCH_WEBHOOK_URL")
 
@@ -308,6 +341,8 @@ def _notify_failure(notifier: Notifier | None, args: argparse.Namespace, started
         job = "訊號成績單"
     elif args.command == "market-update":
         job = "全市場資料更新"
+    elif args.command == "portfolio-track":
+        job = "模擬組合"
     else:
         job = f"回放 {args.replay}" if args.replay else "盤中選股"
     title = f"{job}執行失敗（{started_at:%Y-%m-%d %H:%M}）"

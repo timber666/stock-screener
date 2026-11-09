@@ -139,6 +139,9 @@ def config_dir(tmp_path: Path) -> Path:
     market["raw_dir"] = str(tmp_path / "data" / "research" / "market_raw")
     market["output_dir"] = str(tmp_path / "data" / "backtest" / "market")
     market["check_dir"] = str(tmp_path / "data" / "research" / "market_check")
+    research["factors"]["output_dir"] = str(tmp_path / "data" / "research" / "factors")
+    research["portfolio"]["output_dir"] = str(tmp_path / "data" / "research" / "portfolio")
+    research["portfolio"]["paper_db_path"] = str(tmp_path / "data" / "research" / "paper_portfolio.db")
     write_yaml(research_path, research)
     return target
 
