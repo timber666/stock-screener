@@ -11,8 +11,8 @@ import math
 import random
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 import numpy as np
@@ -49,6 +49,7 @@ class Candidate:
     held_days: int                  # 該檔自己的交易日數
     delayed: bool                   # 出場條件成立當天收跌停，順延到之後第一個沒有跌停的收盤
     growth: tuple[tuple[date, float], ...]  # 進場隔天到出場日：(日期, 還原收盤 / 進場日還原收盤)
+    factors: Mapping[str, float] = field(default_factory=dict, compare=False)  # 因子挑選用：因子 id → 進場日的值（NaN 為沒有值）
 
 
 def find_candidates(history: StockHistory, engine: Engine, trend_config: TrendConfig, start: date, end: date,
@@ -122,7 +123,7 @@ def _at_limit(history: StockHistory, i: int, side: Side) -> bool:
 class AccountSettings:
     initial_capital: float
     max_positions: int
-    pick: str                       # nearest_ma、volume_ratio 或 random
+    pick: str                       # nearest_ma、volume_ratio、random，或因子 id（Candidate.factors）
     cost: CostConfig
     min_commission: float
 
@@ -249,7 +250,7 @@ def simulate_account(candidates: Sequence[Candidate], calendar: Sequence[date], 
 
 
 def order_candidates(candidates: Sequence[Candidate], pick: str, rng: random.Random | None) -> list[Candidate]:
-    """訊號超過空位時的優先順序；同分時依代號。"""
+    """訊號超過空位時的優先順序；同分時依代號。因子挑選：因子值高的優先，沒有值的排最後（RESEARCH_PLAN.md 4.7）。"""
     ordered = sorted(candidates, key=lambda c: c.code)
     if pick == "nearest_ma":
         return sorted(ordered, key=lambda c: c.ma_gap_pct)
@@ -260,7 +261,14 @@ def order_candidates(candidates: Sequence[Candidate], pick: str, rng: random.Ran
             raise ValueError("隨機挑選需要 rng")
         rng.shuffle(ordered)
         return ordered
-    raise ValueError(f"未知的挑選方式：{pick}")
+    if all(pick in c.factors for c in ordered):
+        return sorted(ordered, key=lambda c: _factor_key(c.factors[pick]))
+    raise ValueError(f"未知的挑選方式：{pick}（因子挑選要先把因子值加到每個候選）")
+
+
+def _factor_key(value: float) -> tuple[bool, float]:
+    """因子值高的優先；沒有值（NaN）的排最後。"""
+    return (True, 0.0) if math.isnan(value) else (False, -value)
 
 
 def _affordable_shares(budget: float, price: float, settings: AccountSettings) -> int:

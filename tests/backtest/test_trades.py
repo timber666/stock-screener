@@ -1,5 +1,6 @@
 """交易回測的進場訊號、出場、帳戶模擬與績效（RESEARCH_PLAN.md 4.2；PROJECT_PLAN.md 5.4、5.5）。"""
 
+import math
 import random
 from dataclasses import replace
 from datetime import date, timedelta
@@ -287,3 +288,19 @@ def test_invalid_trade_config_is_rejected(tmp_path: Path, key: str, value, messa
 
     with pytest.raises(ConfigError, match=message):
         load_backtest_config(tmp_path / "backtest.yaml")
+
+
+def test_factor_pick_prefers_high_values_and_puts_missing_last() -> None:
+    def with_factor(code: str, value: float) -> Candidate:
+        return replace(cand(code, 0, 10.0, 3, 10.0), factors={"rev_yoy": value})
+
+    cands = [with_factor("4444", math.nan), with_factor("3333", 0.1), with_factor("2222", 0.5), with_factor("1111", 0.1),
+             with_factor("0050", math.nan)]
+
+    assert [c.code for c in order_candidates(cands, "rev_yoy", None)] == ["2222", "1111", "3333", "0050", "4444"]
+    assert sorted(t.code for t in simulate(cands, cap=2, pick="rev_yoy").trades) == ["1111", "2222"]
+
+
+def test_factor_pick_needs_values_on_every_candidate() -> None:
+    with pytest.raises(ValueError, match="未知的挑選方式：rev_yoy"):
+        order_candidates([cand("1111", 0, 10.0, 3, 10.0)], "rev_yoy", None)

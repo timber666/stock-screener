@@ -12,7 +12,7 @@
 """
 
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
@@ -51,12 +51,15 @@ def value_table(store: SqliteMarketStore) -> pd.DataFrame:
     return table
 
 
-def load_market_histories(store: SqliteMarketStore, config: UniverseConfig) -> MarketHistories:
+def load_market_histories(store: SqliteMarketStore, config: UniverseConfig,
+                          extra_codes: Collection[str] = ()) -> MarketHistories:
+    """曾經入選股票池的股票；extra_codes 另外加入從沒入選的股票（例：觀察清單，只用來算因子值，RESEARCH_PLAN.md 4.7），
+    這些股票不在任何一個月的股票池內，不產生訊號、不列入基準。"""
     values = value_table(store)
     if values.empty:
         raise ValueError("market.db 沒有任何行情")
     universe = build_universe(values, size=config.size, lookback_days=config.lookback_days)
-    codes = universe.codes
+    codes = universe.codes | frozenset(extra_codes)
     first_day = values.index[0]
     results: dict[str, list[DividendResult]] = defaultdict(list)
     for result, _ in store.dividend_results():

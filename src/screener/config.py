@@ -68,6 +68,14 @@ class EventsSettings:
 
 
 @dataclass(frozen=True)
+class FactorSnapshotSettings:
+    """研究端每週產生的營收年增快照，scan 唯讀（D57）。"""
+
+    path: Path
+    max_age_days: int               # 產生日到今天超過這麼多天就不顯示，並在訊息底部提醒
+
+
+@dataclass(frozen=True)
 class Settings:
     db_path: Path
     log_dir: Path
@@ -76,6 +84,7 @@ class Settings:
     finmind: FinMindSettings
     mis: MisSettings
     discord: DiscordSettings
+    factor_snapshot: FactorSnapshotSettings
 
 
 @dataclass(frozen=True)
@@ -130,6 +139,7 @@ class TradeConfig:
     initial_capital: float          # 初始資金（元）
     max_positions: tuple[int, ...]  # 同時最多幾檔，各跑一次
     picks: tuple[str, ...]          # 訊號超過空位時的挑選方式（TRADE_PICKS）
+    factor_picks: tuple[str, ...]   # 因子值高的優先（RESEARCH_PLAN.md 4.7）：research.yaml 的因子 id，執行時檢查
     pick_ma: int                    # nearest_ma：距離這條均線最近的優先
     random_runs: int                # 隨機挑選跑幾次
     random_seed: int
@@ -308,7 +318,8 @@ def rules_fingerprint(rules: RulesConfig) -> str:
 def _load_settings(path: Path) -> Settings:
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"db_path", "log_dir", "snapshot_dir", "backfill_days", "finmind", "mis", "discord"}, where)
+    check_keys(data, {"db_path", "log_dir", "snapshot_dir", "backfill_days", "finmind", "mis", "discord",
+                      "factor_snapshot"}, where)
 
     finmind_where = f"{where} > finmind"
     finmind_data = get_field(data, "finmind", dict, where)
@@ -333,6 +344,13 @@ def _load_settings(path: Path) -> Settings:
     check_keys(discord_data, _REQUEST_KEYS, discord_where)
     discord = DiscordSettings(**_parse_request_settings(discord_data, discord_where))
 
+    snapshot_where = f"{where} > factor_snapshot"
+    snapshot_data = get_field(data, "factor_snapshot", dict, where)
+    check_keys(snapshot_data, {"path", "max_age_days"}, snapshot_where)
+    factor_snapshot = FactorSnapshotSettings(path=Path(get_field(snapshot_data, "path", str, snapshot_where)),
+                                             max_age_days=get_field(snapshot_data, "max_age_days", int, snapshot_where))
+    require(factor_snapshot.max_age_days >= 0, f"{snapshot_where} > max_age_days：不可為負數")
+
     settings = Settings(
         db_path=Path(get_field(data, "db_path", str, where)),
         log_dir=Path(get_field(data, "log_dir", str, where)),
@@ -341,6 +359,7 @@ def _load_settings(path: Path) -> Settings:
         finmind=finmind,
         mis=mis,
         discord=discord,
+        factor_snapshot=factor_snapshot,
     )
     require(settings.backfill_days > 0, f"{where} > backfill_days：必須大於 0")
     return settings
@@ -457,8 +476,8 @@ def load_backtest_config(path: Path) -> BacktestConfig:
 
 
 def _parse_trade(data: Mapping[str, Any], where: str) -> TradeConfig:
-    check_keys(data, {"initial_capital", "max_positions", "picks", "pick_ma", "random_runs", "random_seed",
-                      "min_commission", "output_dir"}, where)
+    check_keys(data, {"initial_capital", "max_positions", "picks", "factor_picks", "pick_ma", "random_runs",
+                      "random_seed", "min_commission", "output_dir"}, where)
     max_positions = get_field(data, "max_positions", list, where)
     require(bool(max_positions) and all(isinstance(n, int) and not isinstance(n, bool) and n > 0 for n in max_positions),
             f"{where} > max_positions：應為正整數陣列")
@@ -467,10 +486,16 @@ def _parse_trade(data: Mapping[str, Any], where: str) -> TradeConfig:
     for pick in picks:
         require(pick in TRADE_PICKS, f"{where} > picks：應為 {'、'.join(TRADE_PICKS)} 其中之一，實際為 {pick!r}")
     require(len(picks) == len(set(picks)), f"{where} > picks：不可重複")
+    factor_picks = get_field(data, "factor_picks", list, where)
+    require(all(isinstance(p, str) and p for p in factor_picks), f"{where} > factor_picks：應為因子 id 的陣列")
+    require(len(factor_picks) == len(set(factor_picks)), f"{where} > factor_picks：不可重複")
+    for pick in factor_picks:
+        require(pick not in (*TRADE_PICKS, "random"), f"{where} > factor_picks：{pick} 是 picks 的名稱，不是因子 id")
     trade = TradeConfig(
         initial_capital=get_field(data, "initial_capital", float, where),
         max_positions=tuple(max_positions),
         picks=tuple(picks),
+        factor_picks=tuple(factor_picks),
         pick_ma=get_field(data, "pick_ma", int, where),
         random_runs=get_field(data, "random_runs", int, where),
         random_seed=get_field(data, "random_seed", int, where),

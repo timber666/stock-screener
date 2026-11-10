@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from screener.formatting import format_number
-from screener.models import Hit, ScanReport, Side
+from screener.models import FactorSnapshot, Hit, ScanReport, Side, SnapshotRead, SnapshotStatus
 
 _ELLIPSIS = "…"
 
@@ -71,6 +71,7 @@ class Section:
 
 
 def _sections(report: ScanReport, industries: Mapping[str, tuple[str, ...]]) -> list[Section]:
+    snapshot = _usable(report.factor)
     sections = [Section(head=(_header(report), ""))]
     for side in Side:
         side_hits = tuple(hit for hit in report.hits if hit.side is side)
@@ -79,7 +80,7 @@ def _sections(report: ScanReport, industries: Mapping[str, tuple[str, ...]]) -> 
             group_line = f"▍{group}"
             sections.append(Section(
                 head=(side_line, group_line) if i == 0 else (group_line,),
-                items=tuple(tuple(_hit_lines(hit)) for hit in hits),
+                items=tuple(tuple(_hit_lines(hit, snapshot)) for hit in hits),
                 tail=("",),
                 resume=() if i == 0 else (f"{side_line}（續）",),
                 resume_inside=(f"{side_line}（續）", f"{group_line}（續）"),
@@ -105,7 +106,32 @@ def _footer(report: ScanReport) -> list[str]:
     if report.not_evaluated:
         reason = "當日沒有日 K（無成交或資料未更新）" if report.is_replay else "今日無成交或無報價"
         lines.append(f"⚠️ {len(report.not_evaluated)} 檔{reason}，未評估：{'、'.join(report.not_evaluated)}")
+    if (factor := _factor_footer(report)) is not None:
+        lines.append(factor)
     return lines
+
+
+def _usable(factor: SnapshotRead | None) -> FactorSnapshot | None:
+    return factor.snapshot if factor is not None and factor.status is SnapshotStatus.OK else None
+
+
+def _factor_footer(report: ScanReport) -> str | None:
+    """營收年增的說明（D58）：有任何一檔顯示時才列；快照不能用時一律提醒，否則壞掉的快照沒有人會發現（R42）。"""
+    factor = report.factor
+    if factor is None:                          # 回放
+        return None
+    if factor.status is SnapshotStatus.OK and factor.snapshot is not None:
+        snapshot = factor.snapshot
+        if not any(hit.ctx.info.code in snapshot.values for hit in report.hits):
+            return None
+        return (f"營收年增：{snapshot.month:%Y-%m} 月營收，{snapshot.count:,} 檔上市櫃普通股排名"
+                f"（快照 {snapshot.snapshot_date:%m/%d}）")
+    if factor.status is SnapshotStatus.STALE and factor.snapshot is not None:
+        return (f"⚠️ 因子快照 {factor.snapshot.snapshot_date:%m/%d} 已超過 {factor.max_age_days} 天沒有更新，"
+                "未顯示營收年增")
+    if factor.status is SnapshotStatus.MISSING:
+        return "⚠️ 找不到因子快照，未顯示營收年增"
+    return "⚠️ 因子快照格式錯誤，未顯示營收年增"
 
 
 def _group_hits(hits: tuple[Hit, ...], industries: Mapping[str, tuple[str, ...]]) -> list[tuple[str, list[Hit]]]:
@@ -122,17 +148,27 @@ def _group_hits(hits: tuple[Hit, ...], industries: Mapping[str, tuple[str, ...]]
             if (members := [hit for hit in ordered if hit.ctx.info.group == group])]
 
 
-def _hit_lines(hit: Hit) -> list[str]:
+def _hit_lines(hit: Hit, snapshot: FactorSnapshot | None) -> list[str]:
     info = hit.ctx.info
     quote = f"{info.code} {info.name}  {format_number(hit.ctx.today['close'])}"
     if hit.change_pct is not None:
         quote += f"  {_change(hit.change_pct)}"
     fields = [quote, info.subcategory, hit.ctx.trend.label, "✅ 符合進場" if hit.entry else "",
+              _revenue_growth(snapshot, info.code),
               f"⚠️ 價格為替代值（{hit.price_substitute.label}）" if hit.price_substitute is not None else ""]
     return [
         "｜".join(field for field in fields if field),
         f"  └ {'、'.join(signal.rule_name for signal in hit.signals)}",
     ]
+
+
+def _revenue_growth(snapshot: FactorSnapshot | None, code: str) -> str:
+    """例：「營收年增 +55%（前 18%）」；快照不能用或該檔沒有值時為空字串（D58）。"""
+    if snapshot is None or code not in snapshot.values:
+        return ""
+    value, rank = snapshot.values[code]
+    pct = round(value * 100)
+    return f"營收年增 {f'{pct:+,d}%' if pct else '0%'}（前 {snapshot.percentile(rank)}%）"
 
 
 def _change(pct: float) -> str:

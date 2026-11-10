@@ -36,7 +36,7 @@ def test_help_runs_as_module() -> None:
 RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screener.jobs.backtest",
                     "screener.jobs.trade_backtest", "screener.jobs.corporate_events", "screener.jobs.signal_report",
                     "screener.jobs.market_update", "screener.jobs.market_check", "screener.jobs.factor_report",
-                    "screener.jobs.portfolio_backtest", "screener.jobs.portfolio_track")
+                    "screener.jobs.portfolio_backtest", "screener.jobs.portfolio_track", "screener.jobs.factor_snapshot")
 
 _LOADED_RESEARCH_MODULES = """
 import sys
@@ -557,3 +557,21 @@ def test_dry_run_never_uses_webhook(config_dir: Path, webhook: type[FakeWebhook]
     assert main(["--config-dir", str(config_dir), "scan", "--replay", "2026-02-05", "--dry-run"]) == EXIT_FAILED
 
     assert webhook.sent == []
+
+
+# --- factor-snapshot（RESEARCH_PLAN.md 4.7）---------------------------------------
+
+def test_factor_snapshot_failure_is_notified_in_research_channel(config_dir: Path,
+                                                                 both_webhooks: type[RecordingWebhook]) -> None:
+    # 每週排程（R41）：失敗時錯誤通知推到研究頻道
+    assert main(["--config-dir", str(config_dir), "factor-snapshot"]) == EXIT_FAILED      # market.db 不存在
+
+    ((url, message),) = both_webhooks.sent
+    assert url == RESEARCH_WEBHOOK_URL
+    assert message.startswith("❌ 因子快照執行失敗（") and "請先執行 market-update" in message
+
+
+def test_factor_snapshot_dry_run_does_not_notify(config_dir: Path, both_webhooks: type[RecordingWebhook]) -> None:
+    assert main(["--config-dir", str(config_dir), "factor-snapshot", "--dry-run"]) == EXIT_FAILED
+
+    assert both_webhooks.sent == []

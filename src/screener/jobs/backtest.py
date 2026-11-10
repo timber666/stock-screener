@@ -10,7 +10,7 @@
 import logging
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import date
@@ -123,13 +123,13 @@ def _compare_watchlist(config: AppConfig, result: BacktestResult, loaded: Market
     return f"{text}\n  明細：{path}"
 
 
-def load_market(market: MarketConfig) -> MarketHistories:
-    """讀出全市場曾經入選股票池的股票（訊號回測與交易回測共用）。"""
+def load_market(market: MarketConfig, extra_codes: Collection[str] = ()) -> MarketHistories:
+    """讀出全市場曾經入選股票池的股票（訊號回測與交易回測共用）；extra_codes 見 load_market_histories。"""
     if not market.db_path.is_file():
         raise JobFailed(f"找不到 {market.db_path}，請先執行 market-update")
     with SqliteMarketStore(market.db_path) as store:
         try:
-            loaded = load_market_histories(store, market.universe)
+            loaded = load_market_histories(store, market.universe, extra_codes)
         except ValueError as exc:
             raise JobFailed(f"{market.db_path}：{exc}，請先執行 market-update") from exc
     if not loaded.histories:

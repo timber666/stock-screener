@@ -45,6 +45,8 @@ def test_repo_config_loads() -> None:
     assert config.settings.mis.missing_price_retry == 1
     assert config.settings.finmind.timeout_sec == 30.0
     assert config.settings.snapshot_dir == Path("data/snapshots")
+    assert config.settings.factor_snapshot.path == Path("data/factor_snapshot.csv")
+    assert config.settings.factor_snapshot.max_age_days == 10
     assert config.rules.trend.pivot_ma == 5
     assert [r.id for r in config.rules.trigger_rules] == [
         "bull_ma5_breakout",
@@ -201,6 +203,20 @@ def test_research_settings_are_not_accepted_in_settings_yaml(config_dir: Path, s
     edit_yaml(config_dir / "settings.yaml", lambda d: d.update({section: {}}))
 
     with pytest.raises(ConfigError, match=f"未知的欄位 `{section}`"):
+        load_config(config_dir)
+
+
+def test_negative_factor_snapshot_age_is_rejected(config_dir: Path) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d["factor_snapshot"].update(max_age_days=-1))
+
+    with pytest.raises(ConfigError, match="factor_snapshot > max_age_days：不可為負數"):
+        load_config(config_dir)
+
+
+def test_missing_factor_snapshot_setting_is_rejected(config_dir: Path) -> None:
+    edit_yaml(config_dir / "settings.yaml", lambda d: d.pop("factor_snapshot"))
+
+    with pytest.raises(ConfigError, match="缺少必要欄位 `factor_snapshot`"):
         load_config(config_dir)
 
 

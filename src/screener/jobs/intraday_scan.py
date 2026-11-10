@@ -5,6 +5,8 @@
 
 盤中模式推播成功後，寫入執行紀錄、訊號與報價快照，MIS 原始資料另存壓縮檔（D45、D46）；
 --dry-run 與回放不寫入。
+
+盤中模式另讀研究端產生的營收年增快照，只用於顯示（D57、D58）；讀不到或過期時不顯示、推播照常，回放不讀。
 """
 
 import gzip
@@ -13,6 +15,7 @@ import logging
 import sys
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import TextIO
@@ -22,11 +25,12 @@ from screener.analysis.market import limit_prices
 from screener.analysis.numeric import normalize
 from screener.config import AppConfig, MisSettings, TrendConfig, rules_fingerprint
 from screener.data.base import DataSourceError, PriceStore, QuoteSource
+from screener.data.factor_snapshot import read_snapshot
 from screener.data.mis import MisClient
 from screener.engine import Engine
 from screener.jobs import JobFailed, open_existing_store
 from screener.models import (DailyBar, Hit, PriceSubstitute, Quote, ScanReport, ScanRun, Side, SignalRecord,
-                             StockContext, StockInfo)
+                             SnapshotRead, SnapshotStatus, StockContext, StockInfo)
 from screener.notify.base import Notifier, NotifyError
 from screener.notify.discord import MESSAGE_LIMIT
 from screener.notify.message import format_for_terminal, format_messages
@@ -52,6 +56,8 @@ def run(config: AppConfig, *, replay: date | None, notifier: Notifier | None, ou
                                    trend_config=trend_config, settings=config.settings.mis, now=now)
     if report is None:                          # 非交易日：直接結束，不推播
         return
+    if not report.is_replay:                    # 快照是現在的資料，回放舊日期會錯（R42）
+        report = replace(report, factor=read_factor_snapshot(config, report.day))
 
     messages = format_messages(report, config.watchlist.industries, MESSAGE_LIMIT)
     if notifier is None:
@@ -65,6 +71,22 @@ def run(config: AppConfig, *, replay: date | None, notifier: Notifier | None, ou
     logger.info("已推播 Discord：%d 則", len(messages))
     if not report.is_replay:
         record_scan(config, report, scanned_at=now)
+
+
+def read_factor_snapshot(config: AppConfig, day: date) -> SnapshotRead:
+    """讀取營收年增的快照（D57）。任何錯誤都不會讓 scan 失敗：讀不到時不顯示，訊息底部提醒。"""
+    settings = config.settings.factor_snapshot
+    try:
+        result = read_snapshot(settings.path, today=day, max_age_days=settings.max_age_days)
+    except Exception as exc:                    # 防呆：read_snapshot 已處理預期的錯誤
+        logger.exception("讀取因子快照失敗")
+        return SnapshotRead(SnapshotStatus.INVALID, settings.max_age_days, reason=f"{type(exc).__name__}: {exc}")
+    if result.status is SnapshotStatus.OK and result.snapshot is not None:
+        snapshot = result.snapshot
+        logger.info("因子快照 %s：%s 月營收，%d 檔", snapshot.snapshot_date, f"{snapshot.month:%Y-%m}", snapshot.count)
+    else:
+        logger.warning("因子快照無法使用（%s），不顯示營收年增：%s", result.status.value, result.reason)
+    return result
 
 
 def record_scan(config: AppConfig, report: ScanReport, *, scanned_at: datetime) -> int:

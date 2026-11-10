@@ -75,6 +75,7 @@ python -m screener --help
 | `python -m screener factor-report` | 單因子研究：Rank IC、分位數報酬、換手率、衰減、產業中性前後，觀察段與驗證段分列；`--factors` 只跑指定的因子 |
 | `python -m screener portfolio-backtest` | 組合回測：每月依因子換股、模擬 30 萬元的帳戶；預設跑觀察段的全部組合，`--validate --factor --top-n --pick` 只檢查選定的一組在驗證段的結果 |
 | `python -m screener portfolio-track` | 模擬組合（不下單）：換股週結算上一次的名單、產生新名單並推播到研究頻道，其他週直接結束；`--dry-run` 只印在終端 |
+| `python -m screener factor-snapshot` | 因子快照：全部上市櫃普通股最新一個月的營收年增與排名，寫到 `data/factor_snapshot.csv`，供盤中推播顯示；`--dry-run` 只印摘要與觀察清單的值 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
 
@@ -83,6 +84,7 @@ python -m screener --help
 - 以 TWSE MIS 即時報價合成今日暫定 K 棒，接在資料庫的日 K 之後判斷，約 15～25 秒完成。
 - 非交易日（MIS 回傳的資料日期不是今天）直接結束，不推播。
 - 符合進場規則的股票在訊息中標示「✅ 符合進場」：當天觸發 E1、現價 > 昨日最高價、今日 MA5 > 昨日 MA5，且現價還沒到漲停價。只是標示，不影響觸發結果；不構成投資建議。
+- 每檔股票接著顯示營收年增與它在全部上市櫃普通股中的排名，例：「營收年增 +55%（前 18%）」，底部註明營收月份與快照日期。數值來自每週六 `factor-snapshot` 產生的 `data/factor_snapshot.csv`；檔案不存在、格式錯誤或超過 10 天沒有更新時不顯示，底部提醒一行，推播照常。只是參考，不影響觸發結果與「✅ 符合進場」；`--replay` 不顯示。
 - 結果超過 Discord 單則 2000 字時依族群拆成多則；`--dry-run` 印出時以「──── 第 1/2 則 ────」分隔。
 - 執行失敗（MIS 無法連線、資料庫不存在、`rules.yaml` 錯誤等）時推送「❌ 盤中選股執行失敗」與原因，避免誤以為只是沒有訊號。
 - 未設定 `DISCORD_WEBHOOK_URL` 時無法推播，以結束碼 2 結束；只想看結果請加 `--dry-run`。
@@ -101,11 +103,12 @@ python -m screener --help
 powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1
 ```
 
-註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00），以及三個每週六的研究工作：`stock-screener-market`（09:00，`market-update`）、`stock-screener-portfolio`（09:30，`portfolio-track`）與 `stock-screener-weekly`（10:00，`signal-report`）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00 -WeeklyTime 09:00 -MarketTime 08:00 -PortfolioTime 09:45` 調整，`-Unregister` 移除。
+註冊兩個週一至週五的工作：`stock-screener-scan`（13:10）與 `stock-screener-update`（21:00），以及四個每週六的研究工作：`stock-screener-market`（09:00，`market-update`）、`stock-screener-portfolio`（09:30，`portfolio-track`）、`stock-screener-snapshot`（09:45，`factor-snapshot`）與 `stock-screener-weekly`（10:00，`signal-report`）。時間可用 `-ScanTime 13:05 -UpdateTime 19:00 -WeeklyTime 09:00 -MarketTime 08:00 -PortfolioTime 09:30 -SnapshotTime 09:45` 調整，`-Unregister` 移除。
 
 - 以目前使用者身分執行，電腦須開機且已登入；執行時會出現命令列視窗。
-- 錯過的 update、weekly、market（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
-- weekly 推播到研究頻道；weekly、market 失敗時錯誤通知也推到研究頻道，不影響每日的 scan、update。
+- 錯過的 update、weekly、market、portfolio、snapshot（例：當時關機）會在開機後補跑；錯過的 scan 不補跑。
+- weekly、portfolio 推播到研究頻道；研究工作失敗時錯誤通知也推到研究頻道，不影響每日的 scan、update。
+- snapshot 在 `market.db` 還沒更新到上週五時失敗（開機補跑時可能比 market 先跑）：market 完成後再手動執行一次 `factor-snapshot`。
 - 國定假日照常觸發，scan 會判定為非交易日後結束。
 
 ### 訊號回測（`backtest`）
@@ -154,6 +157,8 @@ python -m screener trade-backtest
 ```bash
 python -m screener trade-backtest --validate --max-positions 5 --pick nearest_ma
 ```
+
+- 因子挑選（[RESEARCH_PLAN.md](RESEARCH_PLAN.md) 4.7）：`backtest.yaml` 的 `trade.factor_picks`（`rev_yoy`、`rev_accel`、`dy`）讓因子值高的訊號優先，與上面的挑選方式並列；因子值由 `data/market.db` 計算（要先執行 `market-update`），觀察清單模式也會讀取，約多 2 分鐘。另把進場訊號依當天的因子值分 5 組，輸出 `signal_groups.csv`（持有 5 日的報酬與超額、照出場規則的報酬）。`factor_picks` 為空陣列時與原本相同。
 
 #### 定期更新（建議每月一次）
 

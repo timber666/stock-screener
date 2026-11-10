@@ -48,7 +48,7 @@ def config(tmp_path: Path):
 @pytest.fixture
 def backtest(tmp_path: Path):
     bt = load_backtest_config(REPO_CONFIG_DIR / "backtest.yaml")
-    trade = replace(bt.trade, max_positions=(1, 2), random_runs=5, output_dir=tmp_path / "trade")
+    trade = replace(bt.trade, max_positions=(1, 2), random_runs=5, output_dir=tmp_path / "trade", factor_picks=())
     return replace(bt, signal_start=ZIGZAG.index[0], validation_start=VALIDATION_START, trade=trade)
 
 
@@ -140,7 +140,7 @@ def cli_config_dir(config_dir: Path, config, tmp_path: Path) -> Path:
     write_yaml(config_dir / "settings.yaml", settings)
     bt = read_yaml(config_dir / "backtest.yaml")
     bt.update(signal_start=ZIGZAG.index[0], validation_start=VALIDATION_START)
-    bt["trade"].update(random_runs=2, output_dir=str(tmp_path / "cli-trade"))
+    bt["trade"].update(random_runs=2, output_dir=str(tmp_path / "cli-trade"), factor_picks=[])   # 不讀 market.db
     write_yaml(config_dir / "backtest.yaml", bt)
     return config_dir
 

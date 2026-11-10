@@ -129,6 +129,7 @@ def config_dir(tmp_path: Path) -> Path:
     settings["db_path"] = str(tmp_path / "data" / "screener.db")
     settings["log_dir"] = str(tmp_path / "logs")
     settings["snapshot_dir"] = str(tmp_path / "data" / "snapshots")
+    settings["factor_snapshot"]["path"] = str(tmp_path / "data" / "factor_snapshot.csv")
     write_yaml(settings_path, settings)
     research_path = target / "research.yaml"
     research = read_yaml(research_path)

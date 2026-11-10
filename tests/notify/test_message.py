@@ -1,10 +1,14 @@
 """推播訊息格式（PROJECT_PLAN.md 第 11 節）。"""
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from conftest import make_bars, make_context
-from screener.models import Hit, Market, PriceSubstitute, ScanReport, Side, Signal, StockInfo, Trend
+from screener.models import (FactorSnapshot, Hit, Market, PriceSubstitute, ScanReport, Side, Signal, SnapshotRead,
+                             SnapshotStatus, StockInfo, Trend)
 from screener.notify.message import format_failure, format_messages, format_report, text_length
 
 INDUSTRIES = {"PCB": ("銅箔基板", "PCB製造"), "記憶體": (), "半導體": ("製造", "封測")}
@@ -255,3 +259,75 @@ def test_long_failure_detail_is_truncated() -> None:
     lines = text.splitlines()
     assert text_length(text) <= 100
     assert lines[1].endswith("…") and lines[2] == f"詳細內容請看 log：{Path('logs/x.log')}"
+
+
+# --- 營收年增（D58）-----------------------------------------------------------
+
+SNAPSHOT = FactorSnapshot(month=date(2026, 9, 1), snapshot_date=date(2026, 11, 7), count=1977,
+                          values={"2330": (0.5465, 352), "3037": (12.5, 1), "2408": (-0.1313, 1652), "1000": (0.004, 990),
+                                  "2383": (-0.006, 1000)})
+
+
+def with_factor(item: ScanReport, status: SnapshotStatus = SnapshotStatus.OK,
+                snapshot: FactorSnapshot | None = SNAPSHOT) -> ScanReport:
+    return replace(item, factor=SnapshotRead(status, 10, snapshot if status in (SnapshotStatus.OK, SnapshotStatus.STALE)
+                                             else None))
+
+
+def test_revenue_growth_follows_entry_and_precedes_the_substitute_warning() -> None:
+    text = format_report(with_factor(report(
+        hit("2330", "半導體", "製造", "多頭突破五日線紅K", entry=True, substitute=PriceSubstitute.BEST_BID),
+        is_replay=False)), INDUSTRIES)
+
+    assert "2330 股2330  123.5  ▲3.2%｜製造｜多頭｜✅ 符合進場｜營收年增 +55%（前 18%）｜⚠️ 價格為替代值（最佳買價）" in text
+
+
+def test_revenue_growth_format() -> None:
+    text = format_report(with_factor(report(
+        hit("3037", "PCB", "PCB製造", "三線多排"),
+        hit("2408", "記憶體", None, "三線空排", side=Side.SHORT, trend=Trend.BEAR),
+        hit("1000", "PCB", "PCB製造", "三線多排"),
+        hit("2383", "PCB", "銅箔基板", "三線多排"),
+        is_replay=False)), INDUSTRIES)
+
+    assert "｜PCB製造｜多頭｜營收年增 +1,250%（前 1%）" in text
+    assert "｜空頭｜營收年增 -13%（前 84%）" in text
+    assert "1000 股1000  123.5  ▲3.2%｜PCB製造｜多頭｜營收年增 0%（前 51%）" in text
+    assert "2383 股2383  123.5  ▲3.2%｜銅箔基板｜多頭｜營收年增 -1%（前 51%）" in text
+
+
+def test_stock_without_a_value_has_no_revenue_field_and_footer_explains_the_column() -> None:
+    text = format_report(with_factor(report(
+        hit("2330", "半導體", "製造", "三線多排"),
+        hit("4444", "半導體", "封測", "三線多排"),
+        is_replay=False)), INDUSTRIES)
+
+    assert "4444 股4444  123.5  ▲3.2%｜封測｜多頭\n" in text
+    assert text.splitlines()[-1] == "營收年增：2026-09 月營收，1,977 檔上市櫃普通股排名（快照 11/07）"
+
+
+def test_footer_is_omitted_when_no_stock_has_a_value() -> None:
+    text = format_report(with_factor(report(hit("4444", "半導體", "封測", "三線多排"), is_replay=False)), INDUSTRIES)
+    empty = format_report(with_factor(report(is_replay=False)), INDUSTRIES)
+
+    assert "營收年增" not in text and "營收年增" not in empty
+
+
+@pytest.mark.parametrize(("status", "footer"), [
+    (SnapshotStatus.STALE, "⚠️ 因子快照 11/07 已超過 10 天沒有更新，未顯示營收年增"),
+    (SnapshotStatus.MISSING, "⚠️ 找不到因子快照，未顯示營收年增"),
+    (SnapshotStatus.INVALID, "⚠️ 因子快照格式錯誤，未顯示營收年增"),
+])
+@pytest.mark.parametrize("with_hits", [True, False], ids=["hits", "no-hits"])
+def test_unusable_snapshot_shows_no_values_and_a_warning(status: SnapshotStatus, footer: str, with_hits: bool) -> None:
+    hits = (hit("2330", "半導體", "製造", "三線多排"),) if with_hits else ()
+    text = format_report(with_factor(report(*hits, is_replay=False), status), INDUSTRIES)
+
+    assert "營收年增 +" not in text
+    assert text.splitlines()[-1] == footer
+
+
+def test_replay_has_no_revenue_growth() -> None:
+    text = format_report(report(hit("2330", "半導體", "製造", "三線多排")), INDUSTRIES)
+
+    assert "營收年增" not in text and "因子快照" not in text

@@ -20,3 +20,6 @@ discord:
   retry: 3                    # 連線失敗、逾時、伺服器錯誤或被限流（HTTP 429）時的重試次數
   retry_backoff_sec: 5        # 被限流時改等 Discord 指定的秒數
   request_interval_sec: 1     # 多則訊息之間的間隔
+factor_snapshot:              # 研究端每週產生的營收年增快照（factor-snapshot），scan 唯讀（D57）
+  path: data/factor_snapshot.csv
+  max_age_days: 10            # 產生日到今天超過這麼多天就不顯示，並在訊息底部提醒；檔案不存在或格式錯誤時同樣不顯示

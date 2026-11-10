@@ -238,6 +238,7 @@ class ScanReport:
     prev_close_mismatch: tuple[str, ...] = ()   # MIS 參考價與資料庫昨收不一致的代號（盤中，7.2）
     substituted: tuple[str, ...] = ()           # 現價為替代值（最佳買價／賣價）的代號（盤中，8.2）
     quotes: tuple[Quote, ...] = ()              # MIS 回傳的全部報價（盤中；重新查詢的以新的取代），供記錄快照
+    factor: "SnapshotRead | None" = None        # 營收年增的快照（盤中，D58）；回放為 None，不顯示
 
 
 @dataclass(frozen=True)
@@ -269,3 +270,34 @@ class SignalRecord:
     price_substitute: PriceSubstitute | None    # 現價為替代值時的來源
     change_pct: float | None        # 漲跌幅（%），以 MIS 參考價計算
     detail: str                     # 例："量比 1.80x，突破 40 日高 123.5"
+
+
+@dataclass(frozen=True)
+class FactorSnapshot:
+    """營收年增的因子快照（PROJECT_PLAN.md D57、D58）：研究端每週產生，scan 唯讀，讀寫在 data/factor_snapshot.py。"""
+
+    month: date                     # 營收月份（該月 1 日）
+    snapshot_date: date             # 產生日；過期從這天算
+    count: int                      # 排名的檔數（全部上市櫃普通股中有值的）
+    values: Mapping[str, tuple[float, int]] = field(compare=False)  # 代號 → (營收年增（小數）, 由高到低的名次)
+
+    def percentile(self, rank: int) -> int:
+        """「前 x%」的 x：名次 ÷ 檔數 × 100，無條件進位到整數（第 1 名為 1，最後一名為 100）。"""
+        return -(-rank * 100 // self.count)
+
+
+class SnapshotStatus(Enum):
+    OK = "ok"
+    MISSING = "missing"             # 檔案不存在
+    INVALID = "invalid"             # 讀不出來或格式錯誤
+    STALE = "stale"                 # 產生日到今天超過 max_age_days
+
+
+@dataclass(frozen=True)
+class SnapshotRead:
+    """讀取快照的結果。OK 與 STALE 時帶著快照（STALE 只用來顯示日期）；其他情況為 None。"""
+
+    status: SnapshotStatus
+    max_age_days: int
+    snapshot: FactorSnapshot | None = None
+    reason: str = ""                # 不是 OK 時的原因，記在 log

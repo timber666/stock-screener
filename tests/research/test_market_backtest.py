@@ -117,7 +117,8 @@ def test_market_trade_backtest_lists_the_watchlist(tmp_path: Path) -> None:
     write_market(tmp_path / "market.db", bars, {"1111": 2_000_000, "2222": 1_000_000})
     bt = load_backtest_config(REPO_CONFIG_DIR / "backtest.yaml")
     bt = replace(bt, signal_start=ZIGZAG.index[0], validation_start=VALIDATION_START,
-                 trade=replace(bt.trade, max_positions=(1, 2), random_runs=5, output_dir=tmp_path / "trade"))
+                 trade=replace(bt.trade, max_positions=(1, 2), random_runs=5, output_dir=tmp_path / "trade",
+                               factor_picks=()))
     out = io.StringIO()
 
     result = trade_job.run(watchlist_config(tmp_path, bars), bt, rules=CONFIG.rules, rules_label="rules.yaml",

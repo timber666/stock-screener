@@ -14,14 +14,15 @@ import pytest
 
 from conftest import REPO_CONFIG_DIR, load_fixture, make_bars, to_bars
 from screener.config import load_config, rules_fingerprint
+from screener.data.factor_snapshot import write_snapshot
 from screener.data.base import DataSourceError
 from screener.data.db import SqlitePriceStore
 from screener.engine import Engine
 from screener.jobs import JobFailed
 from screener.jobs import intraday_scan as intraday_scan_module
 from screener.jobs.intraday_scan import intraday_scan, replay_scan, run
-from screener.models import (DailyBar, Market, PriceSubstitute, Quote, ScanRun, Side, SignalRecord, StockContext,
-                             StockInfo, Trend)
+from screener.models import (DailyBar, FactorSnapshot, Market, PriceSubstitute, Quote, ScanRun, Side, SignalRecord,
+                             StockContext, StockInfo, Trend)
 from screener.notify.base import NotifyError
 
 CONFIG = load_config(REPO_CONFIG_DIR)
@@ -95,8 +96,9 @@ class FakeNotifier:
 
 
 def settings_in(tmp_path: Path):
-    """資料庫與快照都指向暫存目錄。"""
-    return replace(CONFIG.settings, db_path=tmp_path / "screener.db", snapshot_dir=tmp_path / "snapshots")
+    """資料庫、報價快照與因子快照都指向暫存目錄；因子快照預設不存在。"""
+    return replace(CONFIG.settings, db_path=tmp_path / "screener.db", snapshot_dir=tmp_path / "snapshots",
+                   factor_snapshot=replace(CONFIG.settings.factor_snapshot, path=tmp_path / "factor_snapshot.csv"))
 
 
 @pytest.fixture
@@ -438,6 +440,7 @@ def test_run_prints_intraday_report(intraday_config) -> None:
         "",
         "觀察 2 檔｜觸發 1 檔（多方 1、空方 0）",
         "⚠️ 1 檔今日無成交或無報價，未評估：2222",
+        "⚠️ 找不到因子快照，未顯示營收年增",
         "",
     ])
 
@@ -546,3 +549,80 @@ def test_record_failure_after_push_fails_the_job(intraday_config, tmp_path: Path
 
     assert len(notifier.sent) == 1                          # 已推播的訊息不受影響
     assert recorded(tmp_path) is None
+
+
+# --- 營收年增的快照（D57、D58）-----------------------------------------------
+
+def write_factor_snapshot(config, snapshot_date: date, values: dict[str, tuple[float, int]] | None = None) -> None:
+    values = values if values is not None else {"1111": (0.35, 1), "9999": (-0.2, 2)}
+    write_snapshot(config.settings.factor_snapshot.path,
+                   FactorSnapshot(month=date(2025, 12, 1), snapshot_date=snapshot_date, count=len(values), values=values))
+
+
+def test_snapshot_is_shown_but_not_recorded(intraday_config, tmp_path: Path) -> None:
+    config = intraday_config(quote("1111"), quote("2222"))
+    write_factor_snapshot(config, date(2026, 1, 31))
+    notifier = FakeNotifier()
+
+    run(config, replay=None, notifier=notifier, now=NOW)
+
+    (message,) = notifier.sent
+    assert "1111 股1111  110  ▲10.0%｜銅箔基板｜盤整｜營收年增 +35%（前 50%）\n" in message
+    assert message.splitlines()[-1] == "營收年增：2025-12 月營收，2 檔上市櫃普通股排名（快照 01/31）"
+    scan, signals, _ = recorded(tmp_path)
+    assert scan.rules_fingerprint == rules_fingerprint(config.rules)
+    assert "2222 股2222  110  ▲10.0%｜銅箔基板｜盤整\n" in message          # 快照沒有 2222 的值
+    assert [(s.code, s.rule_id, s.detail) for s in signals] == [
+        ("1111", "ma_bull_alignment", "MA5 102 > MA10 101 > MA20 100.5"),
+        ("2222", "ma_bull_alignment", "MA5 102 > MA10 101 > MA20 100.5")]     # 訊號紀錄不含營收年增
+
+
+@pytest.mark.parametrize(("prepare", "footer"), [
+    (lambda config: write_factor_snapshot(config, date(2026, 1, 22)), "⚠️ 因子快照 01/22 已超過 10 天沒有更新，未顯示營收年增"),
+    (lambda config: config.settings.factor_snapshot.path.write_text("壞掉的檔案", encoding="utf-8"),
+     "⚠️ 因子快照格式錯誤，未顯示營收年增"),
+    (lambda config: None, "⚠️ 找不到因子快照，未顯示營收年增"),
+], ids=["stale", "invalid", "missing"])
+def test_unusable_snapshot_does_not_stop_the_push(intraday_config, tmp_path: Path, prepare, footer: str) -> None:
+    config = intraday_config(quote("1111"), quote("2222"))
+    prepare(config)
+    notifier = FakeNotifier()
+
+    run(config, replay=None, notifier=notifier, now=NOW)
+
+    (message,) = notifier.sent
+    assert "營收年增 +" not in message and message.splitlines()[-1] == footer
+    assert recorded(tmp_path) is not None
+
+
+def test_snapshot_ten_days_old_is_still_shown(intraday_config) -> None:
+    config = intraday_config(quote("1111"), quote("2222"))
+    write_factor_snapshot(config, date(2026, 1, 23))        # 2026-02-02 − 10 天
+    out = io.StringIO()
+
+    run(config, replay=None, notifier=None, out=out, now=NOW)
+
+    assert "營收年增 +35%（前 50%）" in out.getvalue()
+
+
+def test_unexpected_read_error_does_not_stop_the_push(intraday_config, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = intraday_config(quote("1111"), quote("2222"))
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("意外的錯誤")
+
+    monkeypatch.setattr(intraday_scan_module, "read_snapshot", broken)
+    notifier = FakeNotifier()
+
+    run(config, replay=None, notifier=notifier, now=NOW)
+
+    assert notifier.sent[0].splitlines()[-1] == "⚠️ 因子快照格式錯誤，未顯示營收年增"
+
+
+def test_replay_does_not_show_the_snapshot(replay_config) -> None:
+    write_factor_snapshot(replay_config, DAY, {"1111": (0.35, 1), "2222": (0.1, 2), "4444": (0.2, 3)})
+    out = io.StringIO()
+
+    run(replay_config, replay=DAY, notifier=None, out=out)
+
+    assert "營收年增" not in out.getvalue() and "因子快照" not in out.getvalue()

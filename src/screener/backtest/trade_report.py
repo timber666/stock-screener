@@ -32,7 +32,9 @@ def pick_label(pick: str, trade: TradeConfig, runs: int | None = None) -> str:
         return f"距 MA{trade.pick_ma} 最近"
     if pick == "volume_ratio":
         return "量比最大"
-    return f"隨機（{runs} 次中位數）" if runs is not None else "隨機"
+    if pick == RANDOM:
+        return f"隨機（{runs} 次中位數）" if runs is not None else "隨機"
+    return f"{pick} 最高"                       # 因子挑選（RESEARCH_PLAN.md 4.7）
 
 
 # --- 統計 -------------------------------------------------------------------
@@ -85,19 +87,23 @@ def format_summary(result: TradeBacktestResult, trade: TradeConfig, cost: CostCo
     lines += _table(["上限", "挑選", "總報酬", "年化", "最大回撤", "交易", "勝率", "賺賠比", "平均檔數",
                      "資金使用", "空手日", "額滿放棄", "成本(元)"], rows)
     first = table.iloc[0]
+    caps = {run.settings.max_positions for run in result.runs}
+    picks = {run.settings.pick for run in result.runs}
     lines += ["", f"基準（{baseline_label}每天等權，不扣成本）：總報酬 {_pct(first['benchmark_return'])}、"
                   f"年化 {_pct(first['benchmark_cagr'])}、最大回撤 {_pct(first['benchmark_max_drawdown'])}",
               f"隨機挑選的總報酬括號內為 {RANDOM_LOW}%～{RANDOM_HIGH}% 範圍；固定的挑選方式落在範圍內，代表看不出挑選能力",
+              f"這次比較 {len(caps)} 種上限 × {len(picks)} 種挑選方式 = {len(result.runs)} 組（另有隨機）："
+              "比較得越多，碰巧最好的一組越容易高估",
               "",
               f"統計：{output_dir / 'summary.csv'}　交易明細：{output_dir / 'trades.csv'}　"
               f"每日帳戶：{output_dir / 'equity.csv'}　圖表：{output_dir / 'report.html'}"]
     return "\n".join(lines)
 
 
-def _pct(value: float, *, sign: bool = True) -> str:
+def _pct(value: float, *, sign: bool = True, digits: int = 1) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return "-"
-    return f"{value:+.1f}%" if sign else f"{value:.0f}%"
+    return f"{value:+.{digits}f}%" if sign else f"{value:.0f}%"
 
 
 def _num(value: float, digits: int = 2) -> str:
@@ -149,7 +155,7 @@ def write_csv(result: TradeBacktestResult, trade: TradeConfig, output_dir: Path)
 
 # --- 圖表報表 ---------------------------------------------------------------
 
-_COLORS = ["#2a78d6", "#E8853D", "#5DA271", "#9467bd"]
+_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]   # 依序指派，不循環
 _GRAY = "#8d8c87"
 
 
@@ -210,3 +216,51 @@ def _drawdown_figure(runs: Sequence[AccountResult], benchmark: pd.Series, trade:
         dd = drawdown(bench)
         figure.add_trace(go.Scatter(x=list(dd.index), y=dd, name="基準", line={"color": "#1f1f1d", "dash": "dash"}))
     return figure
+
+
+# --- 訊號分組（RESEARCH_PLAN.md 4.7）------------------------------------------
+
+_GROUP_COLUMNS = {
+    "factor": "因子", "group": "組", "count": "次數", "ret_mean": "持有平均(%)", "ret_median": "持有中位數(%)",
+    "excess_mean": "超額平均(%)", "win_rate": "持有勝率(%)", "trade_mean": "照出場規則平均(%)",
+    "trade_median": "照出場規則中位數(%)", "trade_win_rate": "照出場規則勝率(%)",
+}
+
+
+def group_label(group: object, quantiles: int) -> str:
+    if group == "top_minus_bottom":
+        return f"第 {quantiles} 組 − 第 1 組"
+    if group == 0:
+        return "沒有值"
+    if group == -1:
+        return "不分組"
+    return f"第 {group} 組"
+
+
+def format_signal_groups(groups: pd.DataFrame, *, segment: str, horizon: int, quantiles: int, round_trip_pct: float,
+                         path: Path) -> str:
+    """終端摘要的一段：每個因子 × 組一列。"""
+    lines = [f"■ 訊號分組（{segment}的全部進場訊號，不受檔數上限影響）：依進場日的因子值分 {quantiles} 組，"
+             f"分組用當天股票池內有值的股票（同 M9），第 {quantiles} 組因子值最大",
+             f"  持有 {horizon} 日：進場日收盤 → 第 {horizon} 根 K 棒收盤，超額 = 減去同一天的基準；"
+             f"照出場規則：交易回測的每筆報酬，扣來回成本 {round_trip_pct:.2f}%"]
+    rows = []
+    for _, row in groups.iterrows():
+        diff = row["group"] == "top_minus_bottom"
+        rows.append([row["factor"], group_label(row["group"], quantiles), "" if diff else f"{row['count']:,.0f}",
+                     _pct(row["ret_mean"], digits=2), "" if diff else _pct(row["ret_median"], digits=2),
+                     _pct(row["excess_mean"], digits=2), "" if diff else _pct(row["win_rate"], sign=False),
+                     _pct(row["trade_mean"], digits=2), "" if diff else _pct(row["trade_median"], digits=2),
+                     "" if diff else _pct(row["trade_win_rate"], sign=False)])
+    lines += _table(["因子", "組", "次數", "持有平均", "中位數", "超額", "勝率", "照出場規則平均", "中位數", "勝率"],
+                    rows, indent=2)
+    lines.append(f"  明細：{path}")
+    return "\n".join(lines)
+
+
+def write_signal_groups(groups: pd.DataFrame, *, segment: str, quantiles: int, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table = groups.reindex(columns=list(_GROUP_COLUMNS)).copy()
+    table["group"] = [group_label(g, quantiles) for g in table["group"]]
+    table.insert(0, "段", segment)
+    table.rename(columns=_GROUP_COLUMNS).round(4).to_csv(path, index=False, encoding="utf-8-sig")

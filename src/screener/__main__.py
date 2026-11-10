@@ -1,7 +1,7 @@
 """CLI 入口：python -m screener <command>（PROJECT_PLAN.md 第 12 節）。
 
 研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check、factor-report、portfolio-backtest、
-portfolio-track）的程式在執行該指令時才匯入：每日排程的 update、scan
+portfolio-track、factor-snapshot）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
 """
 
@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     trade_parser.add_argument("--validate", action="store_true",
                               help="只跑驗證段，需同時指定 --max-positions 與 --pick（只檢查觀察段選定的一組）")
     trade_parser.add_argument("--max-positions", type=int, metavar="N", help="驗證段使用的檔數上限")
-    trade_parser.add_argument("--pick", metavar="PICK", help="驗證段使用的挑選方式，例：nearest_ma、volume_ratio")
+    trade_parser.add_argument("--pick", metavar="PICK", help="驗證段使用的挑選方式，例：nearest_ma、volume_ratio、rev_yoy")
     trade_parser.add_argument("--rules-file", type=Path, metavar="PATH",
                               help="改用另一份規則檔，不影響每日推播（預設為 config/rules.yaml）")
     _add_universe(trade_parser)
@@ -161,6 +161,14 @@ def build_parser() -> argparse.ArgumentParser:
                     "（設定在 config/research.yaml 的 portfolio.track）。需先執行 market-update。",
     )
     track_parser.add_argument("--dry-run", action="store_true", help="只印在終端，不寫入、不推播")
+
+    snapshot_parser = commands.add_parser(
+        "factor-snapshot",
+        help="因子快照：全部上市櫃普通股的營收年增與排名，供盤中推播顯示（研究使用）",
+        description="由 market.db 的月營收計算全部上市櫃普通股最新一個月的營收年增與排名，寫到 settings.yaml 的 "
+                    "factor_snapshot.path，scan 推播時讀取並顯示（PROJECT_PLAN.md D57、D58）。需先執行 market-update。",
+    )
+    snapshot_parser.add_argument("--dry-run", action="store_true", help="只印摘要與觀察清單的值，不寫檔")
 
     analyze_parser = commands.add_parser(
         "analyze",
@@ -277,14 +285,20 @@ def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets,
 
         portfolio_track.run(config, load_research_config(args.config_dir / "research.yaml"),
                             load_backtest_config(args.config_dir / "backtest.yaml"), notifier=notifier)
+    elif args.command == "factor-snapshot":
+        from screener.jobs import factor_snapshot
+
+        factor_snapshot.run(config, load_research_config(args.config_dir / "research.yaml"), dry_run=args.dry_run)
     elif args.command == "trade-backtest":
         from screener.jobs import trade_backtest    # 需要研究套件 plotly
 
         rules_file = args.rules_file or args.config_dir / "rules.yaml"
-        trade_backtest.run(config, load_backtest_config(args.config_dir / "backtest.yaml"),
+        backtest_config = load_backtest_config(args.config_dir / "backtest.yaml")
+        needs_research = args.universe == "market" or bool(backtest_config.trade.factor_picks)    # 因子挑選讀 market.db
+        trade_backtest.run(config, backtest_config,
                            rules=load_rules(rules_file), rules_label=str(rules_file), validate=args.validate,
                            max_positions=args.max_positions, pick=args.pick, universe=args.universe,
-                           research=_market_research(args))
+                           research=load_research_config(args.config_dir / "research.yaml") if needs_research else None)
     else:
         from screener.jobs import backtest      # 需要研究套件 plotly
 
@@ -302,7 +316,8 @@ def _market_research(args: argparse.Namespace) -> ResearchConfig | None:
 
 def _notifier(args: argparse.Namespace, settings: DiscordSettings, secrets: Secrets) -> Notifier | None:
     """scan 推播結果與錯誤通知；update 只推錯誤通知（D30）；signal-report 的結果與錯誤通知都推到研究頻道（D43）；
-    portfolio-track 同 signal-report；market-update（每週排程，R9）只把錯誤通知推到研究頻道，未設定時只記錄在 log；其餘指令與 --dry-run 不推播。"""
+    portfolio-track 同 signal-report；market-update（每週排程，R9）與 factor-snapshot（每週排程，R41）只把錯誤通知推到
+    研究頻道，未設定時只記錄在 log；其餘指令與 --dry-run 不推播。"""
     if args.command in ("signal-report", "portfolio-track"):
         if args.dry_run:
             return None
@@ -312,7 +327,7 @@ def _notifier(args: argparse.Namespace, settings: DiscordSettings, secrets: Secr
                               "只要在終端查看請加上 --dry-run")
         return DiscordWebhook(settings, secrets.discord_research_webhook_url, env_name="DISCORD_RESEARCH_WEBHOOK_URL")
 
-    if args.command == "market-update":
+    if args.command == "market-update" or (args.command == "factor-snapshot" and not args.dry_run):
         if secrets.discord_research_webhook_url:
             return DiscordWebhook(settings, secrets.discord_research_webhook_url,
                                   env_name="DISCORD_RESEARCH_WEBHOOK_URL")
@@ -343,6 +358,8 @@ def _notify_failure(notifier: Notifier | None, args: argparse.Namespace, started
         job = "全市場資料更新"
     elif args.command == "portfolio-track":
         job = "模擬組合"
+    elif args.command == "factor-snapshot":
+        job = "因子快照"
     else:
         job = f"回放 {args.replay}" if args.replay else "盤中選股"
     title = f"{job}執行失敗（{started_at:%Y-%m-%d %H:%M}）"

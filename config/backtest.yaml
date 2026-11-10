@@ -15,6 +15,7 @@ trade:                          # 交易回測：python -m screener trade-backte
   initial_capital: 300000       # 初始資金（元）；觀察段、驗證段各自從這個金額開始
   max_positions: [3, 5, 10]     # 同時最多幾檔，各跑一次；單筆金額 = 當天權益 ÷ 檔數上限
   picks: [nearest_ma, volume_ratio]   # 訊號超過空位時的挑選方式：距均線最近、量比最大；隨機一定會跑
+  factor_picks: [rev_yoy, rev_accel, dy]   # 因子值高的優先（RESEARCH_PLAN.md 4.7、R40）：research.yaml 的因子 id；空陣列時不讀 market.db
   pick_ma: 5                    # nearest_ma 使用的均線
   random_runs: 100              # 隨機挑選跑幾次，列出中位數與 5%～95% 範圍
   random_seed: 42               # 固定種子，重跑結果相同

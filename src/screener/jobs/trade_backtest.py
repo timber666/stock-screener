@@ -5,6 +5,9 @@
 
 --universe market 改用全市場的動態股票池（RESEARCH_PLAN.md 4.3）：觀察段從 market.signal_start 起，基準為當月
 股票池每天等權，輸出到 market.output_dir 的 trade/；另以相同的組合重跑觀察清單，在兩者都有資料的期間並列。
+
+backtest.yaml 的 trade.factor_picks（RESEARCH_PLAN.md 4.7、R40）：因子值高的優先。因子值由 market.db 計算（兩種範圍都要
+research.yaml），並把進場訊號依當天的因子值分組，輸出 signal_groups.csv。
 """
 
 import logging
@@ -13,13 +16,15 @@ import random
 import sys
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import TextIO
 
 from screener.backtest.signals import StockHistory
 from screener.backtest.stats import OBSERVE, VALIDATE
-from screener.backtest.trade_report import TradeBacktestResult, format_summary, pick_label, write_csv, write_html
+from screener.backtest.trade_report import (TradeBacktestResult, format_signal_groups, format_summary, pick_label,
+                                           write_csv, write_html, write_signal_groups)
 from screener.backtest.trades import (RANDOM, AccountSettings, Candidate, benchmark_series, find_candidates,
                                       simulate_account)
 from screener.config import AppConfig, BacktestConfig, ConfigError, ResearchConfig, RulesConfig, TradeConfig
@@ -30,6 +35,8 @@ from screener.jobs.backtest import (MARKET, MARKET_BASELINE, WATCHLIST, load_his
 from screener.research.market.compare import MARKET as MARKET_LABEL
 from screener.research.market.compare import WATCHLIST as WATCHLIST_LABEL
 from screener.research.market.compare import format_trade_comparison, trade_comparison
+from screener.research.trade_factors import (FactorTables, attach_factors, build_factor_tables, check_factors,
+                                             signal_groups, signal_returns)
 
 logger = logging.getLogger(__name__)
 
@@ -39,27 +46,46 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
         out: TextIO | None = None, workers: int | None = None) -> TradeBacktestResult:
     trade = backtest.trade
     caps, picks = select_runs(trade, validate=validate, max_positions=max_positions, pick=pick)
+    factor_ids = tuple(how for how in picks if how in trade.factor_picks)
     engine = Engine.from_config(rules)          # 先檢查規則，錯誤時在讀資料前就結束
     if not engine.entry_rules:
         raise ConfigError(f"{rules_label} 沒有啟用的進場規則（entry_rules），無法做交易回測")
     if not engine.exit_rules:
         raise ConfigError(f"{rules_label} 沒有啟用的出場規則（exit_rules），無法做交易回測")
+    if (universe == MARKET or factor_ids) and research is None:
+        raise ValueError("全市場與因子挑選需要 research.yaml 的設定")
+    if factor_ids:
+        check_factors(research, factor_ids)
+    # 觀察清單中從沒入選股票池的股票也加進因子的面板，只用來算自己的因子值（R42）
+    extra = [stock.code for stock in config.watchlist.stocks] if factor_ids else []
+    tables: FactorTables | None = None
     if universe == MARKET:
-        if research is None:
-            raise ValueError("全市場需要 research.yaml 的設定")
-        loaded = load_market(research.market)
-        histories, warnings = loaded.histories, market_warnings(loaded)
+        loaded = load_market(research.market, extra_codes=extra)
+        pool = loaded.universe.codes
+        histories = [h for h in loaded.histories if h.info.code in pool]
+        warnings = market_warnings(loaded)
         observe_start, output_root = research.market.signal_start, research.market.output_dir / "trade"
-        universe_label, baseline_label = market_label(research.market, loaded), MARKET_BASELINE
+        universe_label = market_label(research.market, replace(loaded, histories=histories))     # 不含加進來的代號
+        baseline_label = MARKET_BASELINE
+        if factor_ids:
+            tables = _factor_tables(loaded.histories, research, rules, factor_ids)
+        del loaded
     else:
         histories, warnings = load_histories(config)
         observe_start, output_root = backtest.signal_start, trade.output_dir
         universe_label, baseline_label = f"觀察清單 {len(histories)} 檔", "全清單"
+        if factor_ids:
+            tables = _factor_tables(load_market(research.market, extra_codes=extra).histories, research, rules,
+                                    factor_ids)
 
     segment, start, end, calendar = _segment(histories, backtest, observe_start, validate=validate)
     logger.info("交易回測（%s）%s ~ %s：%d 檔，規則檔 %s", segment, start, end, len(histories), rules_label)
     candidates = find_all_candidates(histories, rules, start=start, end=end, pick_ma=trade.pick_ma, workers=workers)
     logger.info("進場訊號 %d 個", len(candidates))
+    if tables is not None:
+        candidates = attach_factors(candidates, tables)
+        if late := sum(c.entry_day > tables.last_day for c in candidates):
+            warnings = [*warnings, f"market.db 只到 {tables.last_day}，之後的 {late} 個進場訊號沒有因子值（排在最後）"]
     runs = tuple(simulate_account(candidates, calendar, end, _settings(backtest, cap, how))
                  for cap in caps for how in picks)
     randoms = {cap: tuple(simulate_account(candidates, calendar, end, _settings(backtest, cap, RANDOM),
@@ -75,12 +101,32 @@ def run(config: AppConfig, backtest: BacktestConfig, *, rules: RulesConfig, rule
     write_html(result, trade, output_dir / "report.html", baseline_label=baseline_label)
     text = format_summary(result, trade, backtest.cost, universe_label=universe_label, rules_label=rules_label,
                           output_dir=output_dir, warnings=warnings, baseline_label=baseline_label)
+    groups_path = output_dir / "signal_groups.csv"
+    groups_path.unlink(missing_ok=True)
+    if tables is not None:
+        text += "\n\n" + _signal_groups(candidates, histories, tables, factor_ids, backtest, segment, groups_path)
     if universe == MARKET:
         text += "\n\n" + _compare_watchlist(config, backtest, rules, candidates, calendar, histories, caps, picks,
                                              start=max(research.market.compare_start, start), end=end,
-                                             output_dir=output_dir, workers=workers)
+                                             output_dir=output_dir, workers=workers, tables=tables)
     (out or sys.stdout).write(text + "\n")
     return result
+
+
+def _factor_tables(histories: Sequence[StockHistory], research: ResearchConfig, rules: RulesConfig,
+                   factor_ids: Sequence[str]) -> FactorTables:
+    logger.info("計算因子值：%s（market.db %d 檔）", "、".join(factor_ids), len(histories))
+    return build_factor_tables(histories, research.market, research, rules.trend, factor_ids)
+
+
+def _signal_groups(candidates: Sequence[Candidate], histories: Sequence[StockHistory], tables: FactorTables,
+                   factor_ids: Sequence[str], backtest: BacktestConfig, segment: str, path: Path) -> str:
+    """訊號分組（RESEARCH_PLAN.md 4.7）：持有天數為 backtest.yaml 的 summary_horizon。"""
+    horizon, cost = backtest.summary_horizon, backtest.cost.round_trip_pct
+    groups = signal_groups(candidates, signal_returns(candidates, histories, horizon, cost), tables, factor_ids)
+    write_signal_groups(groups, segment=segment, quantiles=tables.quantiles, path=path)
+    return format_signal_groups(groups, segment=segment, horizon=horizon, quantiles=tables.quantiles,
+                                round_trip_pct=cost, path=path)
 
 
 def _segment(histories: Sequence[StockHistory], backtest: BacktestConfig, observe_start: date, *,
@@ -107,7 +153,7 @@ def _settings(backtest: BacktestConfig, cap: int, how: str) -> AccountSettings:
 def _compare_watchlist(config: AppConfig, backtest: BacktestConfig, rules: RulesConfig,
                        candidates: Sequence[Candidate], calendar: Sequence[date], histories: Sequence[StockHistory],
                        caps: Sequence[int], picks: Sequence[str], *, start: date, end: date, output_dir: Path,
-                       workers: int | None) -> str:
+                       workers: int | None, tables: FactorTables | None = None) -> str:
     """相同的檔數上限與挑選方式，在兩者都有資料的期間各自從初始資金開始（隨機挑選只在主要結果列出）。"""
     watchlist, _ = load_histories(config)
     end = min(end, max(h.bars.index[-1] for h in watchlist))
@@ -121,6 +167,8 @@ def _compare_watchlist(config: AppConfig, backtest: BacktestConfig, rules: Rules
     logger.info("對照：觀察清單 %d 檔，%s ~ %s", len(watchlist), start, end)
     watch_candidates = find_all_candidates(watchlist, rules, start=start, end=end, pick_ma=backtest.trade.pick_ma,
                                            workers=workers)
+    if tables is not None:
+        watch_candidates = attach_factors(watch_candidates, tables)
     market_bench = benchmark_series(histories, market_calendar, backtest.trade.initial_capital)
     watch_bench = benchmark_series(watchlist, watch_calendar, backtest.trade.initial_capital)
     runs = []
@@ -140,17 +188,18 @@ def _compare_watchlist(config: AppConfig, backtest: BacktestConfig, rules: Rules
 def select_runs(trade: TradeConfig, *, validate: bool, max_positions: int | None,
                 pick: str | None) -> tuple[tuple[int, ...], tuple[str, ...]]:
     """觀察段跑設定檔的全部組合；驗證段只跑指定的一組，而且必須是觀察段比較過的組合（D32）。"""
+    picks = (*trade.picks, *trade.factor_picks)
     if not validate:
         if max_positions is not None or pick is not None:
             raise ConfigError("--max-positions、--pick 只能和 --validate 一起使用：觀察段會跑 backtest.yaml 的全部組合")
-        return trade.max_positions, trade.picks
+        return trade.max_positions, picks
     if max_positions is None or pick is None:
         raise ConfigError("--validate 需要同時指定 --max-positions 與 --pick：驗證段只檢查在觀察段選定的一組（D32）")
     if max_positions not in trade.max_positions:
         raise ConfigError(f"--max-positions {max_positions}：應為 backtest.yaml 的 max_positions 其中之一 "
                           f"{list(trade.max_positions)}")
-    if pick not in trade.picks:
-        raise ConfigError(f"--pick {pick}：應為 backtest.yaml 的 picks 其中之一 {list(trade.picks)}")
+    if pick not in picks:
+        raise ConfigError(f"--pick {pick}：應為 backtest.yaml 的 picks 或 factor_picks 其中之一 {list(picks)}")
     return (max_positions,), (pick,)
 
 
