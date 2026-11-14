@@ -1,6 +1,6 @@
 # 台股技術面盤中選股系統：專案規劃書
 
-> 版本：v0.35（2026-11-14）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 全市場資料完成，見 `RESEARCH_PLAN.md` 4.3；M9 單因子研究完成，見 `RESEARCH_PLAN.md` 4.4、4.5；M10 組合回測與模擬組合完成，見 `RESEARCH_PLAN.md` 4.6；M11 回饋到每日選股完成：推播顯示營收年增（D57、D58）；交易回測的因子挑選沒有一致的改善，因子不成為篩選規則，見 `RESEARCH_PLAN.md` 4.7、R43）
+> 版本：v0.36（2026-11-14）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 全市場資料完成，見 `RESEARCH_PLAN.md` 4.3；M9 單因子研究完成，見 `RESEARCH_PLAN.md` 4.4、4.5；M10 組合回測與模擬組合完成，見 `RESEARCH_PLAN.md` 4.6；M11 回饋到每日選股完成：推播顯示營收年增（D57、D58）；交易回測的因子挑選沒有一致的改善，因子不成為篩選規則，見 `RESEARCH_PLAN.md` 4.7、R43）
 >
 > 本文件是每日選股系統與共用部分的單一事實來源；研究功能（M7 起）的規劃在 `RESEARCH_PLAN.md`，兩者的邊界見 10.4。實作前請完整閱讀。標記「⚠️ 待確認」的項目是使用者尚未拍板的決定：請採用文中預設值，並保持可在設定檔調整，不要自行改變規則語意。已拍板的決定記錄在第 15 節，不需要再次詢問。
 
@@ -212,7 +212,7 @@ M7 起在同一個專案進行量化研究：驗證哪些選股依據在台股�
 - 收盤跌停鎖死賣不掉時，順延到之後第一個沒有收在跌停價的收盤，可以超過 5 天。跌停價的算法同 14.1。
 - 設定在 `rules.yaml` 的 `exit_rules`，任一條成立就賣出，原因取 `rules.yaml` 順序的第一條。只有交易回測（`RESEARCH_PLAN.md` 4.2）使用；每日的 `scan`、`update` 不使用，也不推播出場提醒（系統不知道實際持股）。出場規則不列入規則檔指紋（D56）。
 
-### 5.5 進場規則（已定義；推播標示已實作，交易回測尚未規劃）
+### 5.5 進場規則（已定義，用於推播標示與交易回測）
 
 觸發規則（5.3）只篩出值得看的候選，不等於實際進場：一天可能有數十檔觸發，不可能全部進場，收在漲跌停的訊號也很難成交。分成三層定義：觸發（候選）、進場（實際要做哪些、怎麼做）、出場（5.4）。
 
@@ -508,7 +508,7 @@ factor_snapshot:             # 營收年增的快照（D57）：研究指令 fac
 
 `factor_snapshot` 是每日系統讀取研究產物的唯一例外（D57）：路徑放在這裡，研究端寫入、`scan` 讀取用的是同一個設定。
 
-連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有 `backtest`、`trade-backtest` 指令會讀取，欄位見 14.1 與 `RESEARCH_PLAN.md` 4.2；`research.yaml` 只有研究指令會讀取（`events`、`signal-report`、`market-update`、`market-check`、`factor-report`、`portfolio-backtest`、`portfolio-track`、`factor-snapshot`，以及 `--universe market` 與有因子挑選的回測），見 9.5。`backtest.yaml` 的 `trade.factor_picks`（交易回測的因子挑選，`RESEARCH_PLAN.md` 4.7）不是空陣列時，`trade-backtest` 也會讀取 `research.yaml` 與 `market.db`。
+連線失敗、逾時、回應傳到一半連線中斷與 HTTP 5xx 會重試（FinMind、MIS、Discord 與證交所 ISIN 清單相同）。研究的設定不放在這裡（10.4 規則 4）：`backtest.yaml` 只有研究指令會讀取：`backtest`、`trade-backtest`，以及沿用其中驗證段起點與交易成本（`cost`、`trade.min_commission`）的 `factor-report`、`portfolio-backtest`、`portfolio-track`；`portfolio-track` 是每週六的排程，`backtest.yaml` 寫錯時會失敗並通知研究頻道。欄位見 14.1 與 `RESEARCH_PLAN.md` 4.2；`research.yaml` 只有研究指令會讀取（`events`、`signal-report`、`market-update`、`market-check`、`factor-report`、`portfolio-backtest`、`portfolio-track`、`factor-snapshot`，以及 `--universe market` 與有因子挑選的回測），見 9.5。`backtest.yaml` 的 `trade.factor_picks`（交易回測的因子挑選，`RESEARCH_PLAN.md` 4.7）不是空陣列時，`trade-backtest` 也會讀取 `research.yaml` 與 `market.db`。
 
 ### 9.4 `.env`（不進版控，另提供 `.env.example`）
 
@@ -771,7 +771,7 @@ stock-screener/
 │   ├── settings.yaml
 │   ├── watchlist.yaml
 │   ├── rules.yaml
-│   ├── backtest.yaml          # 訊號回測（14.1），只有 backtest 指令會讀取
+│   ├── backtest.yaml          # 訊號回測（14.1）與交易回測，只有研究指令會讀取（9.3）
 │   └── research.yaml          # 研究的設定（9.5），只有研究指令會讀取
 ├── src/screener/
 │   ├── __main__.py            # CLI：update / scan / analyze；研究指令（events、backtest、signal-report、market-update 等）執行時才匯入
@@ -1114,6 +1114,7 @@ M4、M5 的驗證：
 
 ## 16. 變更紀錄
 
+- v0.36（2026-11-14）：完整檢查 M0–M11 後的文件更正。5.5 的標題改為「用於推播標示與交易回測」（交易回測已在 v0.29 完成）；9.3 與第 12 節的 `backtest.yaml` 補上也會讀取的 `factor-report`、`portfolio-backtest`、`portfolio-track`（驗證段起點與交易成本），README 與 `backtest.yaml` 的註解同步修改。程式、規則、設定值與推播內容都沒有改變。
 - v0.35（2026-11-14）：M10 完成（`RESEARCH_PLAN.md` 4.6）：模擬組合產生第一份名單。研究的基本面因子修正取樣的沿用（`RESEARCH_PLAN.md` R44），只改研究程式；每日的 `scan`、`update`、推播內容與規則都沒有改變。版本列的狀態與第 14 節。
 - v0.34（2026-11-11）：M11 完成（`RESEARCH_PLAN.md` 4.7）：11/11 13:10 第一次正式推播顯示營收年增；版本列的狀態與第 14 節。規則、設定與推播內容都沒有改變。
 - v0.33（2026-11-10）：M11 回饋到每日選股（`RESEARCH_PLAN.md` 4.7、R39–R42）。新增 D57：每日系統唯讀一份因子快照（`data/factor_snapshot.csv`），10.4 規則 3 的唯一例外；D58：推播的每檔股票顯示營收年增與百分位，不影響訊號。`scan` 推播前讀取快照（7.2 第 6 步、第 11 節）；`settings.yaml` 新增 `factor_snapshot`（9.3）；新增研究指令 `factor-snapshot` 與排程 `stock-screener-snapshot`（10.4、第 12、14 節）；`trade-backtest` 新增因子挑選（`backtest.yaml` 的 `trade.factor_picks`，9.3），結果沒有一致的改善，使用者決定因子不成為篩選規則（`RESEARCH_PLAN.md` R43）；第 2 節範圍。觸發規則、趨勢、符合進場、訊號紀錄與規則檔指紋都沒有改變。

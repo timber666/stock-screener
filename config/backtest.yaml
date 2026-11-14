@@ -1,4 +1,6 @@
-# 訊號回測（PROJECT_PLAN.md 14.1）與交易回測（RESEARCH_PLAN.md 4.2）。只有 backtest、trade-backtest 指令會讀取這個檔案。
+# 訊號回測（PROJECT_PLAN.md 14.1）與交易回測（RESEARCH_PLAN.md 4.2）。只有研究指令會讀取這個檔案：backtest、trade-backtest，
+# 以及沿用驗證段起點與交易成本（cost、trade.min_commission）的 factor-report、portfolio-backtest、portfolio-track
+# （portfolio-track 是每週六的排程，這個檔案寫錯時它會失敗並通知研究頻道）。寫錯不影響每日的 update、scan。
 # 日 K 要先回補到 signal_start 之前約半年（update --since 2020-06-01），讓每個訊號都有完整的計算區間。
 signal_start: 2021-01-01        # 訊號從這天起算
 validation_start: 2025-01-01    # 驗證段的第一天：之前為觀察段，可據以調整參數；之後只用來驗證

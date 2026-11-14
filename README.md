@@ -46,7 +46,7 @@ pip install -e ".[dev,research]"
 | `config/watchlist.yaml` | 觀察清單與族群（附範例，請換成自己的清單） |
 | `config/rules.yaml` | 趨勢判斷與選股規則的參數 |
 | `config/settings.yaml` | 資料庫、log 與 MIS 原始快照的路徑、回補天數；FinMind、MIS、Discord 的請求頻率、逾時與重試 |
-| `config/backtest.yaml` | 訊號回測的期間、持有天數、交易成本等；只有 `backtest` 會讀取 |
+| `config/backtest.yaml` | 訊號回測與交易回測的期間、持有天數、交易成本等：`backtest`、`trade-backtest` 讀取，`factor-report`、`portfolio-backtest`、`portfolio-track` 也沿用其中的驗證段起點與交易成本；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
 | `config/research.yaml` | 研究指令的設定：`events` 的重查天數與交叉驗證門檻、證交所 ISIN 清單的請求設定、訊號成績單的持有天數與輸出位置、全市場資料（`market`：期間、股票池、請求間隔、`market.db` 的位置）、單因子研究（`factors`：持有天數、分組數、因子清單）；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
 | `.env` | FinMind token、Discord webhook URL（`DISCORD_WEBHOOK_URL` 每日選股、`DISCORD_RESEARCH_WEBHOOK_URL` 研究的定期報告，建議另開一個頻道）；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
