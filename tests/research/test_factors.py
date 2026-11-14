@@ -334,6 +334,53 @@ def test_sample_without_a_trade_keeps_the_previous_sample() -> None:
     assert ep["A"].iloc[2] == pytest.approx(1 / 10 * 10 / 20)
 
 
+SAMPLE_DAYS = pd.Index([date(2026, 8, 3), date(2026, 8, 4), date(2026, 9, 1), date(2026, 9, 2), date(2026, 10, 1)],
+                       name="date")
+
+
+def test_sample_without_a_positive_value_ends_the_previous_sample() -> None:
+    # 9/01 的取樣明確沒有配息、虧損（R44）：之後沒有值，不沿用 8/03 的樣本；10/01 有新的正數樣本才恢復
+    panel = make_panel({"A": [10.0, 11.0, 12.0, 15.0, 20.0]}, index=SAMPLE_DAYS)
+    values = pd.DataFrame([{"code": "A", "date": "2026-08-03", "market": "tse", "pe": 10.0, "pb": 1.0, "dividend_yield": 5.0},
+                           {"code": "A", "date": "2026-09-01", "market": "tse", "pe": None, "pb": 1.0, "dividend_yield": 0.0},
+                           {"code": "A", "date": "2026-10-01", "market": "tse", "pe": 8.0, "pb": 1.0, "dividend_yield": 2.0}])
+    ctx = context(panel, valuations=values)
+
+    dy = compute("dividend_yield", ctx)["A"]
+    ep = compute("earnings_yield", ctx)["A"]
+
+    assert dy.iloc[1] == pytest.approx(5.0 * 10 / 11)
+    assert np.isnan(dy.iloc[2]) and np.isnan(dy.iloc[3])
+    assert dy.iloc[4] == pytest.approx(2.0)
+    assert ep.iloc[1] == pytest.approx(1 / 10 * 10 / 11)
+    assert np.isnan(ep.iloc[2]) and np.isnan(ep.iloc[3])
+    assert ep.iloc[4] == pytest.approx(1 / 8)
+    assert compute("book_yield", ctx)["A"].iloc[3] == pytest.approx(1 / 1 * 12 / 15)     # 淨值比有值，照常更新
+
+
+def test_stock_missing_from_a_sample_keeps_the_previous_sample() -> None:
+    # 9/01 的取樣裡沒有 A（沒有資訊）：沿用 8/03 的樣本與它的價格
+    panel = make_panel({"A": [10.0, 11.0, 12.0, 15.0, 20.0], "B": [5.0] * 5}, index=SAMPLE_DAYS)
+    values = pd.DataFrame([{"code": "A", "date": "2026-08-03", "market": "tse", "pe": 10.0, "pb": 1.0, "dividend_yield": 5.0},
+                           {"code": "B", "date": "2026-09-01", "market": "tse", "pe": 9.0, "pb": 1.0, "dividend_yield": 3.0}])
+
+    dy = compute("dividend_yield", context(panel, valuations=values))
+
+    assert dy["A"].iloc[3] == pytest.approx(5.0 * 10 / 15)
+    assert np.isnan(dy["B"].iloc[1]) and dy["B"].iloc[3] == pytest.approx(3.0)
+
+
+def test_unusable_zero_sample_keeps_the_previous_sample() -> None:
+    # 取樣日沒有成交時，即使樣本是 0 也不用（同「取樣日沒有成交」），沿用上一次的正數樣本
+    panel = make_panel({"A": [10.0, 11.0, NAN, 15.0, 20.0]}, index=SAMPLE_DAYS)
+    values = pd.DataFrame([{"code": "A", "date": "2026-08-03", "market": "tse", "pe": 10.0, "pb": 1.0, "dividend_yield": 5.0},
+                           {"code": "A", "date": "2026-09-01", "market": "tse", "pe": None, "pb": 1.0, "dividend_yield": 0.0}])
+
+    dy = compute("dividend_yield", context(panel, valuations=values))
+
+    assert dy["A"].iloc[3] == pytest.approx(5.0 * 10 / 15)
+
+
 def test_share_turnover_uses_latest_shares() -> None:
     index = pd.Index([date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)], name="date")
     panel = make_panel({"A": [1.0, 1.0, 1.0]}, index=index, volumes=[1.0, 3.0, 2.0])

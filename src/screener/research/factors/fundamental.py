@@ -86,11 +86,15 @@ def revenue_acceleration(context: FactorContext, *, months: int) -> pd.DataFrame
 
 
 def _sampled_table(table: pd.DataFrame, column: str, panel: Panel) -> pd.DataFrame:
-    """每月取樣的欄位 → 日期 × 代號，只有取樣日有值；不是正數的值（虧損沒有本益比、沒有配息）視為沒有值。"""
+    """每月取樣的欄位 → 日期 × 代號，只有取樣日有值。
+
+    取樣裡有這一檔、但值不是正數或是空值（虧損沒有本益比、沒有配息）記為 0：這次取樣明確「沒有值」，
+    carry_forward 不會再沿用更早的樣本（RESEARCH_PLAN.md R44）。取樣裡沒有這一檔時為 NaN（沒有資訊）。
+    """
     if table.empty:
         raise JobFailed("market.db 沒有本益比等資料，請先執行 market-update")
     values = pd.DataFrame({"code": table["code"], "day": [date.fromisoformat(d) for d in table["date"]],
-                           "value": table[column].where(table[column] > 0)}).dropna(subset=["value"])
+                           "value": table[column].where(table[column] > 0, 0.0)})
     sampled = values.pivot_table(index="day", columns="code", values="value", aggfunc="last")
     return sampled.reindex(panel.days).reindex(columns=panel.codes)
 
@@ -98,12 +102,14 @@ def _sampled_table(table: pd.DataFrame, column: str, panel: Panel) -> pd.DataFra
 def carry_forward(sampled: pd.DataFrame, price: pd.DataFrame, *, inverse: bool) -> pd.DataFrame:
     """取樣值以還原價的變動更新到每一天：inverse 時為「值 × 取樣日價格 / 當天價格」（殖利率類），否則為「值 × 當天價格 / 取樣日價格」（市值）。
 
-    取樣日沒有成交的樣本不用（沒有那天的價格可以對應），沿用上一次的樣本。當天沒有成交時為 NaN。
+    取樣日沒有成交的樣本不用（沒有那天的價格可以對應），沿用上一次的樣本；取樣裡沒有這一檔時也沿用。
+    最近一次可用的樣本不是正數（_sampled_table 記為 0）時沒有值，不沿用更早的樣本（R44）。當天沒有成交時為 NaN。
     """
     usable = sampled.where(price.notna())
     value = usable.ffill()
     base = price.where(usable.notna()).ffill()
-    return value * base / price if inverse else value * price / base
+    updated = value * base / price if inverse else value * price / base
+    return updated.where(value > 0)
 
 
 @register_factor("earnings_yield", category="價值")
@@ -153,4 +159,5 @@ def share_turnover(context: FactorContext, *, days: int) -> pd.DataFrame:
     """平均週轉率：每天成交股數 ÷ 當時最新一次取樣的發行股數，取 days 根 K 棒的平均。"""
     panel = context.panel
     shares = _sampled_table(context.shares, "shares", panel).ffill()
+    shares = shares.where(shares > 0)
     return per_stock(panel.volume * SHARES_PER_LOT / shares, lambda s: s.rolling(days).mean())
