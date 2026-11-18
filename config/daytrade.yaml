@@ -1,0 +1,11 @@
+# 當沖的設定（REALTIME_PLAN.md 第 2 節、4.2）。只有即時系統讀取。
+# M12 只有 K 棒與四條線的參數；當沖規則之後加入（Q2），顏色在看盤網頁（M15）加入。
+
+session:
+  open: "09:00"          # 第一根 K 棒的開始時間；3 分、5 分 K 從這裡對齊（2.1）
+  closing_call: "13:25"  # 收盤集合競價開始：到 close 之前只有試撮（2.1）
+  close: "13:30"         # 收盤成交的時間：這一分鐘的成交自成一根，之後的成交不計入（2.1）
+
+moving_averages:    # 3MA、5MA（2.2）：bar_minutes 分 K 最近 period 根收盤價的簡單平均，延續前一交易日
+  - { id: ma3, bar_minutes: 3, period: 3 }    # 藍線
+  - { id: ma5, bar_minutes: 5, period: 5 }    # 金線

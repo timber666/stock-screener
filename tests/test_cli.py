@@ -37,6 +37,9 @@ RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screene
                     "screener.jobs.trade_backtest", "screener.jobs.corporate_events", "screener.jobs.signal_report",
                     "screener.jobs.market_update", "screener.jobs.market_check", "screener.jobs.factor_report",
                     "screener.jobs.portfolio_backtest", "screener.jobs.portfolio_track", "screener.jobs.factor_snapshot")
+# 盤中即時系統（REALTIME_PLAN.md 4.2 規則 1、5）：shioaji 只裝在 .venv-realtime，排程的環境沒有
+REALTIME_MODULES = ("shioaji", "screener.realtime", "screener.jobs.rt_probe", "screener.jobs.rt_record",
+                    "screener.jobs.rt_bars")
 
 _LOADED_RESEARCH_MODULES = """
 import sys
@@ -49,15 +52,15 @@ print(codes[0], ",".join(p for p in prefixes if any(m == p or m.startswith(p + "
 """
 
 
-def test_daily_commands_do_not_load_research_code(config_dir: Path, tmp_path: Path) -> None:
-    # 依賴只能單向（PROJECT_PLAN.md 10.4 規則 1、5）：每日排程的 update、scan 不載入研究程式與研究套件，
-    # 排程的環境沒有安裝 plotly 也能執行。觀察清單清空，讓指令跑完整個流程而不送出任何請求。
+def test_daily_commands_do_not_load_research_or_realtime_code(config_dir: Path, tmp_path: Path) -> None:
+    # 依賴只能單向（PROJECT_PLAN.md 10.4 規則 1、5；REALTIME_PLAN.md 4.2）：每日排程的 update、scan 不載入研究程式、
+    # 研究套件、即時系統與 shioaji，排程的環境沒有安裝 plotly、shioaji 也能執行。觀察清單清空，讓指令跑完整個流程而不送出任何請求。
     write_yaml(config_dir / "watchlist.yaml", {"industries": {}, "stocks": []})
     env = {key: value for key, value in os.environ.items() if not key.startswith(("FINMIND", "DISCORD"))}
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(REPO_ROOT / "src"), env.get("PYTHONPATH")]))
     env["PYTHONIOENCODING"] = "utf-8"
     result = subprocess.run(
-        [sys.executable, "-c", _LOADED_RESEARCH_MODULES, str(config_dir), *RESEARCH_MODULES],
+        [sys.executable, "-c", _LOADED_RESEARCH_MODULES, str(config_dir), *RESEARCH_MODULES, *REALTIME_MODULES],
         cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", env=env, check=True,
     )
 
@@ -76,6 +79,29 @@ def test_daily_commands_ignore_research_config(config_dir: Path, fake_finmind: t
     assert main(["--config-dir", str(config_dir), "update"]) == EXIT_OK
     assert main(["--config-dir", str(config_dir), "scan", "--replay", date.today().isoformat(), "--dry-run"]) == EXIT_OK
     assert main(["--config-dir", str(config_dir), "events"]) == EXIT_CONFIG_ERROR   # 研究指令才會載入
+
+
+@pytest.mark.parametrize("realtime_yaml", [None, "shioaji: ["], ids=["missing", "broken"])
+def test_daily_commands_ignore_realtime_config(config_dir: Path, fake_finmind: type["FakeFinMindClient"],
+                                               realtime_yaml: str | None) -> None:
+    # 即時系統的設定寫錯或不存在時，update、scan 照常執行（REALTIME_PLAN.md 4.2 規則 4）
+    for name in ("realtime.yaml", "daytrade.yaml"):
+        path = config_dir / name
+        if realtime_yaml is None:
+            path.unlink()
+        else:
+            path.write_text(realtime_yaml, encoding="utf-8")
+
+    assert main(["--config-dir", str(config_dir), "update"]) == EXIT_OK
+    assert main(["--config-dir", str(config_dir), "scan", "--replay", date.today().isoformat(), "--dry-run"]) == EXIT_OK
+    assert main(["--config-dir", str(config_dir), "rt-probe"]) == EXIT_CONFIG_ERROR    # 即時系統的指令才會載入
+
+
+def test_realtime_command_without_keys_is_config_error(config_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(config_dir.parent)                  # 暫存目錄沒有 .env
+
+    assert main(["--config-dir", str(config_dir), "rt-probe", "--tests", "T1"]) == EXIT_CONFIG_ERROR
+    assert "未設定 SHIOAJI_API_KEY、SHIOAJI_SECRET_KEY" in read_log(config_dir)
 
 
 def test_invalid_replay_date_is_rejected() -> None:

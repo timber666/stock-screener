@@ -1,0 +1,35 @@
+# 盤中即時系統的設定（REALTIME_PLAN.md 4.2、7.1）。
+# 只有即時系統的指令（rt-probe、rt-record、rt-bars）讀取；每日的 update、scan 不載入，這裡寫錯不影響 13:10 的推播。
+
+compare_codes: ["4977", "1303", "4951"]   # 對照用的股票：眾達-KY、南亞、精拓科（成交冷門）；實測、錄製與三方對照共用
+
+shioaji:
+  simulation: false             # false = 正式環境（T1）
+  subscribe_trade: false        # 不訂閱委託／成交回報：只用行情，API key 沒有交易權限
+  receive_window_ms: 30000      # 登入簽章的有效時間；電腦時間差太多時會出現「Sign data is timeout」
+  timeout_ms: 30000             # 每次查詢（snapshots、kbars、ticks）的逾時
+  contracts_timeout_ms: 120000  # 下載合約的逾時
+  query_interval_sec: 0.3       # 兩次查詢的最短間隔：官方限制每 10 秒 50 次（0.2 秒），留一些餘裕
+  retry: 2                      # 查詢失敗時的重試次數
+  retry_backoff_sec: 5          # 第 n 次重試前等待 n × 此秒數
+  log_path: logs/shioaji.log    # Shioaji 套件自己的 log（環境變數 SJ_LOG_PATH）；不設定時會寫在目前的目錄
+
+probe:                          # rt-probe（7.1 第 3 點）
+  output_dir: data/realtime/probe
+  snapshot_batches: [50, 100, 200, 290]   # T4：一次查詢的檔數
+  kbars_days: 30                # T5：1 檔查這麼多個日曆天（kbars 每次不超過 30 天）
+  subscribe_limit: 201          # T7：盤後試著訂閱到這個數量（官方上限 200）
+  subscribe_interval_sec: 0.05  # T7：兩次訂閱的間隔
+  usage_settle_sec: 15          # T2：查詢後最多等這麼多秒讓 usage 更新（實測約每 5 秒更新一次）
+
+record:                         # rt-record（7.1 第 4 點）
+  tick_dir: data/ticks          # 每天一個 YYYY-MM-DD.jsonl.gz
+  end_time: "13:35"             # 到這個時間自動停止
+  max_subscriptions: 200        # 每個連線的訂閱上限；成交、五檔各算 1 個（T7 確認前的保守算法）
+  connections: 1                # 連線數；上限若是每個連線，改成 2 就能錄全部 290 檔（L16）
+  flush_interval_sec: 1         # 每隔幾秒把資料寫到磁碟；程式被強制結束時，最多遺失這段時間收到的資料
+  usage_interval_sec: 600       # 每隔幾秒記錄一次流量（usage）
+
+bars:                           # rt-bars（7.1 第 6 點）
+  output_dir: data/realtime/bars
+  prior_lookback_days: 14       # 往前查這麼多個日曆天的分 K，取最後一個交易日延續均線（涵蓋連假）

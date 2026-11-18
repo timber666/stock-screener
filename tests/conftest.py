@@ -1,5 +1,6 @@
 import json
 import shutil
+import sys
 from collections.abc import Iterator, Sequence
 from datetime import date
 from pathlib import Path
@@ -144,6 +145,13 @@ def config_dir(tmp_path: Path) -> Path:
     research["portfolio"]["output_dir"] = str(tmp_path / "data" / "research" / "portfolio")
     research["portfolio"]["paper_db_path"] = str(tmp_path / "data" / "research" / "paper_portfolio.db")
     write_yaml(research_path, research)
+    realtime_path = target / "realtime.yaml"           # 即時系統（REALTIME_PLAN.md 4.2）
+    realtime = read_yaml(realtime_path)
+    realtime["shioaji"]["log_path"] = str(tmp_path / "logs" / "shioaji.log")
+    realtime["probe"]["output_dir"] = str(tmp_path / "data" / "realtime" / "probe")
+    realtime["record"]["tick_dir"] = str(tmp_path / "data" / "ticks")
+    realtime["bars"]["output_dir"] = str(tmp_path / "data" / "realtime" / "bars")
+    write_yaml(realtime_path, realtime)
     return target
 
 
@@ -163,6 +171,14 @@ def _no_real_secrets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FINMIND_TOKEN", raising=False)
     monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
     monkeypatch.delenv("DISCORD_RESEARCH_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("SHIOAJI_API_KEY", raising=False)
+    monkeypatch.delenv("SHIOAJI_SECRET_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_shioaji(monkeypatch: pytest.MonkeyPatch) -> None:
+    """測試不可連到 Shioaji：import shioaji 一律失敗，即時系統的測試注入假的連線（REALTIME_PLAN.md 4.2）。"""
+    monkeypatch.setitem(sys.modules, "shioaji", None)
 
 
 @pytest.fixture(autouse=True)

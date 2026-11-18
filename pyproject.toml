@@ -19,6 +19,9 @@ dependencies = [
 dev = ["pytest>=8.0"]
 # 研究功能專用（PROJECT_PLAN.md 10.4）：排程的 update、scan 不需要；回測的測試需要
 research = ["plotly>=5.0"]
+# 盤中即時系統專用（REALTIME_PLAN.md 4.2、L14）：只裝在 .venv-realtime，排程用的 .venv 不安裝。
+# 1.7.11 是 M12 實測（2026-11-18）時的版本；沒有其他必要的依賴
+realtime = ["shioaji==1.7.11"]
 
 [project.scripts]
 screener = "screener.__main__:main"

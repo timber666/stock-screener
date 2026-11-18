@@ -3,13 +3,16 @@
 研究指令（events、backtest、trade-backtest、signal-report、market-update、market-check、factor-report、portfolio-backtest、
 portfolio-track、factor-snapshot）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
+
+盤中即時系統的指令（rt-probe、rt-record、rt-bars）同樣在執行時才匯入：update、scan 不載入 shioaji 與 screener.realtime
+（REALTIME_PLAN.md 4.2）。
 """
 
 import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 
 from screener.config import (AppConfig, ConfigError, DiscordSettings, ResearchConfig, Secrets, load_backtest_config,
@@ -170,6 +173,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     snapshot_parser.add_argument("--dry-run", action="store_true", help="只印摘要與觀察清單的值，不寫檔")
 
+    probe_parser = commands.add_parser(
+        "rt-probe",
+        help="Shioaji 實測：登入、合約、快照、歷史分 K 與逐筆成交（盤中即時系統）",
+        description="登入 Shioaji 正式環境，依序執行 REALTIME_PLAN.md 7.1 的實測項目，結果寫成報告"
+                    "（realtime.yaml 的 probe.output_dir）。只讀取行情。需要 .env 的 SHIOAJI_API_KEY、SHIOAJI_SECRET_KEY "
+                    "與 realtime 依賴群組（shioaji）。",
+    )
+    probe_parser.add_argument("--tests", type=_parse_ids, metavar="T1,T2",
+                              help="只執行指定的項目，以逗號分隔（T1 一定會執行）")
+    probe_parser.add_argument("--date", type=_parse_date, metavar="YYYY-MM-DD",
+                              help="查詢歷史資料的交易日（預設為最近一個已收盤的平日）")
+
+    record_parser = commands.add_parser(
+        "rt-record",
+        help="盤中錄製：訂閱 Shioaji 的成交與五檔，原樣寫入當天的錄製檔（盤中即時系統）",
+        description="開盤前啟動，訂閱觀察清單的成交（對照股另訂五檔），寫入 realtime.yaml 的 record.tick_dir/"
+                    "YYYY-MM-DD.jsonl.gz，到 record.end_time 或按 Ctrl+C 為止。只讀取行情。",
+    )
+    record_parser.add_argument("--codes", type=_parse_ids, metavar="CODE,CODE",
+                               help="只錄指定的股票（預設為觀察清單全部）")
+    record_parser.add_argument("--until", type=_parse_time, metavar="HH:MM",
+                               help="結束時間（預設為 realtime.yaml 的 record.end_time）")
+    record_parser.add_argument("--connections", type=int, metavar="N",
+                               help="連線數（預設為 realtime.yaml 的 record.connections）")
+
+    bars_parser = commands.add_parser(
+        "rt-bars",
+        help="組 K 棒、算四條線，輸出和台股大學堂對照用的清單（盤中即時系統）",
+        description="以錄製檔、Shioaji 的歷史逐筆成交或歷史分 K 組 1／3／5 分 K、算 3MA、5MA、均價線與 VP，"
+                    "和 Shioaji 的歷史分 K 比對，輸出每分鐘的 CSV 與對照清單（realtime.yaml 的 bars.output_dir）。",
+    )
+    bars_parser.add_argument("--date", type=_parse_date, metavar="YYYY-MM-DD",
+                             help="交易日（預設為最近一個已收盤的平日）")
+    bars_parser.add_argument("--codes", type=_parse_ids, metavar="CODE,CODE",
+                             help="股票代號（預設為 realtime.yaml 的 compare_codes）")
+    bars_parser.add_argument("--source", choices=("kbars", "ticks", "record"),
+                             help="A 的來源：record 錄製檔、ticks 歷史逐筆成交、kbars 歷史分 K"
+                                  "（預設：有當天的錄製檔就用 record，否則 kbars）")
+
     analyze_parser = commands.add_parser(
         "analyze",
         help="輸出指定股票的轉折點與趨勢",
@@ -196,6 +238,13 @@ def _parse_ids(value: str) -> list[str]:
     if not ids:
         raise argparse.ArgumentTypeError("至少要有一個 id")
     return ids
+
+
+def _parse_time(value: str) -> time:
+    try:
+        return time.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"時間格式應為 HH:MM：{value}") from None
 
 
 def _parse_date(value: str) -> date:
@@ -232,6 +281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             intraday_scan.run(config, replay=args.replay, notifier=notifier)
         elif args.command == "analyze":
             analyze.run(config, args.codes, as_of=args.date)
+        elif args.command.startswith("rt-"):
+            _run_realtime(args, config)
         else:
             _run_research(args, config, secrets, notifier)
     except ConfigError as exc:                 # 例：rules.yaml 的規則 id 或參數錯誤，建立規則時才會發現
@@ -307,6 +358,30 @@ def _run_research(args: argparse.Namespace, config: AppConfig, secrets: Secrets,
                      rules=load_rules(rules_file), rules_label=str(rules_file), rule_ids=args.rules,
                      start=args.start, end=args.end, horizon=args.horizon, universe=args.universe,
                      research=_market_research(args))
+
+
+def _run_realtime(args: argparse.Namespace, config: AppConfig) -> None:
+    """盤中即時系統的指令：程式與設定在這裡才匯入、載入（REALTIME_PLAN.md 4.2）。"""
+    from screener.realtime.config import load_daytrade_config, load_realtime_config, load_shioaji_keys
+
+    realtime = load_realtime_config(args.config_dir / "realtime.yaml")
+    daytrade = load_daytrade_config(args.config_dir / "daytrade.yaml")
+    if args.command == "rt-probe":
+        from screener.jobs import rt_probe
+
+        rt_probe.run(config, realtime, daytrade, load_shioaji_keys(ENV_FILE), tests=args.tests, day=args.date)
+    elif args.command == "rt-record":
+        from screener.jobs import rt_record
+
+        rt_record.run(config, realtime, load_shioaji_keys(ENV_FILE), codes=args.codes, until=args.until,
+                      connections=args.connections)
+    elif args.command == "rt-bars":
+        from screener.jobs import rt_bars, rt_probe
+
+        rt_bars.run(config, realtime, daytrade, load_shioaji_keys(ENV_FILE),
+                    day=args.date or rt_probe.default_probe_day(datetime.now()), codes=args.codes, source=args.source)
+    else:
+        raise AssertionError(f"未處理的指令：{args.command}")
 
 
 def _market_research(args: argparse.Namespace) -> ResearchConfig | None:

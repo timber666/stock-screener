@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M0–M11（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)；M12 起的盤中即時系統（規劃中）見 [REALTIME_PLAN.md](REALTIME_PLAN.md)。
+> 🚧 開發中：已完成 M0–M11（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)；M12 起的盤中即時系統（M12 Shioaji 接入與實測進行中）見 [REALTIME_PLAN.md](REALTIME_PLAN.md)。
 
 ## 架構
 
@@ -39,6 +39,18 @@ pip install -e ".[dev,research]"
 
 `research` 是研究功能（`backtest` 的圖表報表）需要的套件；只跑每日的 `update`、`scan` 時可以只裝 `pip install -e .`。
 
+盤中即時系統（`rt-` 開頭的指令）另用一個虛擬環境，排程用的 `.venv` 不安裝 Shioaji（[REALTIME_PLAN.md](REALTIME_PLAN.md) L14）：
+
+```bash
+python -m venv .venv-realtime
+```
+
+```bash
+.venv-realtime\Scripts\python -m pip install -e ".[dev,research,realtime]"
+```
+
+`realtime` 是永豐金證券的 Shioaji（版本固定在實測過的 1.7.11）。需要永豐金證券的帳戶與 API key（只勾「行情／資料」與「正式環境」）。
+
 ## 設定
 
 | 檔案 | 內容 |
@@ -48,7 +60,9 @@ pip install -e ".[dev,research]"
 | `config/settings.yaml` | 資料庫、log 與 MIS 原始快照的路徑、回補天數；FinMind、MIS、Discord 的請求頻率、逾時與重試 |
 | `config/backtest.yaml` | 訊號回測與交易回測的期間、持有天數、交易成本等：`backtest`、`trade-backtest` 讀取，`factor-report`、`portfolio-backtest`、`portfolio-track` 也沿用其中的驗證段起點與交易成本；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
 | `config/research.yaml` | 研究指令的設定：`events` 的重查天數與交叉驗證門檻、證交所 ISIN 清單的請求設定、訊號成績單的持有天數與輸出位置、全市場資料（`market`：期間、股票池、請求間隔、`market.db` 的位置）、單因子研究（`factors`：持有天數、分組數、因子清單）；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
-| `.env` | FinMind token、Discord webhook URL（`DISCORD_WEBHOOK_URL` 每日選股、`DISCORD_RESEARCH_WEBHOOK_URL` 研究的定期報告，建議另開一個頻道）；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
+| `config/realtime.yaml` | 盤中即時系統：對照用的股票、Shioaji 的逾時與查詢間隔、實測報告、錄製檔與對照輸出的位置；只有 `rt-` 指令會讀取，寫錯不影響每日的 `update`、`scan` |
+| `config/daytrade.yaml` | 當沖：交易時段（K 棒的對齊與收盤）、3MA、5MA 的分鐘數與根數；只有 `rt-` 指令會讀取 |
+| `.env` | FinMind token、Discord webhook URL（`DISCORD_WEBHOOK_URL` 每日選股、`DISCORD_RESEARCH_WEBHOOK_URL` 研究的定期報告，建議另開一個頻道）；Shioaji 的 `SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`（盤中即時系統）；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
 設定檔載入時會完整驗證：缺少欄位、型別不符、未知欄位，或觀察清單引用了未定義的族群、子分類，都會直接報錯並指出位置。
 
@@ -75,6 +89,9 @@ python -m screener --help
 | `python -m screener factor-report` | 單因子研究：Rank IC、分位數報酬、換手率、衰減、產業中性前後，觀察段與驗證段分列；`--factors` 只跑指定的因子 |
 | `python -m screener portfolio-backtest` | 組合回測：每月依因子換股、模擬 30 萬元的帳戶；預設跑觀察段的全部組合，`--validate --factor --top-n --pick` 只檢查選定的一組在驗證段的結果 |
 | `python -m screener portfolio-track` | 模擬組合（不下單）：換股週結算上一次的名單、產生新名單並推播到研究頻道，其他週直接結束；`--dry-run` 只印在終端 |
+| `python -m screener rt-probe` | Shioaji 實測：登入正式環境、合約、快照、歷史分 K 與逐筆成交、訂閱，結果寫成報告（盤中即時系統，用 `.venv-realtime`） |
+| `python -m screener rt-record` | 盤中錄製：訂閱觀察清單的成交（對照股另訂五檔），原樣寫入 `data/ticks/YYYY-MM-DD.jsonl.gz`，到 13:35 或按 Ctrl+C 為止 |
+| `python -m screener rt-bars` | 組 1／3／5 分 K、算 3MA、5MA、均價線與 VP，和 Shioaji 的歷史分 K、13:10 的 MIS 快照比對，輸出和台股大學堂對照用的清單 |
 | `python -m screener factor-snapshot` | 因子快照：全部上市櫃普通股最新一個月的營收年增與排名，寫到 `data/factor_snapshot.csv`，供盤中推播顯示；`--dry-run` 只印摘要與觀察清單的值 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
@@ -264,6 +281,19 @@ python -m screener signal-report --dry-run
 - 除權息：持有期間內某天的 MIS 參考價與前一日收盤不同時，以兩者的比例調整；沒有快照的日子改用 `events` 抓取的事件資料。
 - 有 M6 回測結果（`data/backtest/summary.csv`）時，累積的每條規則附上 M6 驗證段的平均超額報酬作為參考。
 - 輸出：推播到研究頻道（`DISCORD_RESEARCH_WEBHOOK_URL`，未設定時以結束碼 2 結束；`--dry-run` 除外），以及每個訊號一列的明細 `data/research/signal_report/<期間最後一天>.csv`。
+
+### 盤中即時系統（`rt-probe`、`rt-record`、`rt-bars`）
+
+M12：把 Shioaji 的資料摸清楚，並確認自己組的 K 棒與四條線和台股大學堂一致（[REALTIME_PLAN.md](REALTIME_PLAN.md) 7.1）。只讀取行情，不下單；不寫入 `screener.db`。指令要用 `.venv-realtime` 的 Python：
+
+```bash
+.venv-realtime\Scripts\python -m screener rt-probe
+```
+
+- `rt-probe`：盤後即可執行。結果寫到 `data/realtime/probe/<執行時間>/`（`report.md`、`report.json` 與原始資料的 CSV）；`--tests T1,T5` 只跑指定的項目，`--date` 指定查詢的交易日。登入或拿不到行情（T1）時停止。
+- `rt-record`：開盤前啟動，到 13:35 自動停止（`--until` 改結束時間，`--codes` 只錄指定的股票，`--connections` 改連線數）。每筆收到就寫入，程式中斷時最多遺失 1 秒的資料；同一天重新啟動會接在原本的檔案後面。
+- `rt-bars`：A（錄製檔或歷史逐筆成交）對 B（Shioaji 的歷史分 K）逐分鐘比對，並輸出 `data/realtime/bars/<日期>/checklist_*.md`：開盤、盤中幾個時點、收盤前後與冷門股沒有成交的時段，供在台股大學堂對照（`--source record|ticks|kbars`）。
+- K 棒與四條線的定義見 [REALTIME_PLAN.md](REALTIME_PLAN.md) 第 2 節：1 分 K 以開始時間標示、試撮與沒有成交的分鐘不畫、13:30 的收盤成交自成一根；3MA、5MA 延續前一交易日、K 棒走完才有值。
 
 ## 選股規則
 

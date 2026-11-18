@@ -10,7 +10,9 @@ __pycache__/
 build/
 dist/
 .venv/
+.venv-realtime/
 venv/
+shioaji.log
 
 # 測試與工具快取
 .pytest_cache/
