@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M0–M11（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)；M12 起的盤中即時系統（M12 Shioaji 接入與實測進行中）見 [REALTIME_PLAN.md](REALTIME_PLAN.md)。
+> 🚧 開發中：已完成 M0–M11（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)；M12 起的盤中即時系統（M12 Shioaji 接入與實測完成）見 [REALTIME_PLAN.md](REALTIME_PLAN.md)。
 
 ## 架構
 
@@ -293,7 +293,7 @@ M12：把 Shioaji 的資料摸清楚，並確認自己組的 K 棒與四條線�
 - `rt-probe`：盤後即可執行。結果寫到 `data/realtime/probe/<執行時間>/`（`report.md`、`report.json` 與原始資料的 CSV）；`--tests T1,T5` 只跑指定的項目，`--date` 指定查詢的交易日。登入或拿不到行情（T1）時停止。
 - `rt-record`：開盤前啟動，到 13:35 自動停止（`--until` 改結束時間，`--codes` 只錄指定的股票，`--connections` 改連線數）。每筆收到就寫入，程式中斷時最多遺失 1 秒的資料；同一天重新啟動會接在原本的檔案後面。
 - `rt-bars`：A（錄製檔或歷史逐筆成交）對 B（Shioaji 的歷史分 K）逐分鐘比對，並輸出 `data/realtime/bars/<日期>/checklist_*.md`：開盤、盤中幾個時點、收盤前後與冷門股沒有成交的時段，供在台股大學堂對照（`--source record|ticks|kbars`）。
-- K 棒與四條線的定義見 [REALTIME_PLAN.md](REALTIME_PLAN.md) 第 2 節：1 分 K 以開始時間標示、試撮與沒有成交的分鐘不畫、13:30 的收盤成交自成一根；3MA、5MA 延續前一交易日、K 棒走完才有值。
+- K 棒與四條線的定義見 [REALTIME_PLAN.md](REALTIME_PLAN.md) 第 2 節：1 分 K 以開始時間標示、試撮與沒有成交的分鐘不畫、13:30 的收盤成交自成一根；3MA、5MA 延續前一交易日，形成中的 K 棒跟著現價移動（即時值），走完才固定（走完的值）；規則用哪一個待設計當沖規則時決定（Q12）。
 
 ## 選股規則
 

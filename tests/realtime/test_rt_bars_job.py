@@ -74,6 +74,9 @@ def test_ticks_match_kbars(setup) -> None:
     # 09:01 時當天第一根 3 分 K 還沒走完，能用的是前一交易日 13:30 那根：(49 + 50 + 51) / 3
     assert float(rows[0]["ma3_known"]) == pytest.approx(50.0)
     assert rows[1]["ma3_known"] == rows[0]["ma3_drawn"]     # 09:03 走完後才能用當天第一根
+    # 即時值：09:00 那根 1 分 K 走完時，形成中的 3 分 K 以 52 代入：(50 + 51 + 52) / 3
+    assert float(rows[0]["ma3_live"]) == pytest.approx(51.0)
+    assert rows[1]["ma3_live"] == rows[1]["ma3_drawn"]       # 09:02 那根走完，09:00 那根 3 分 K 也走完
     assert float(rows[-1]["vp"]) == 54.0                                                 # 收盤量 5 最大
 
 

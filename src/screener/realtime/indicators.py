@@ -1,7 +1,8 @@
 """四條線：3MA、5MA、均價線、VP（REALTIME_PLAN.md 2.2、2.4，L5–L7、L13）。純函式：不碰網路、不匯入 shioaji。
 
-- 3MA、5MA：N 分 K 最近 period 根收盤價的簡單平均，包含該根自己，延續前一交易日的 K 棒。K 棒走完才有值：
-  每個值都帶著走完的時間（available_at），時間 t 只能用 available_at ≤ t 的值（2.4）。不足 period 根時為 None（L13）。
+- 3MA、5MA：N 分 K 最近 period 根收盤價的簡單平均，包含該根自己，延續前一交易日的 K 棒。不足 period 根時為 None（L13）。
+  走完的值（moving_average）：每個值都帶著走完的時間（available_at），時間 t 只能用 available_at ≤ t 的值（2.4）。
+  即時值（live_moving_average_*）：正在形成的那根以目前的收盤（現價）代入，跟著現價移動；這根走完時等於走完的值。
 - 均價線：當天 09:00 起累積成交金額 ÷ 累積成交量，每筆成交都更新。
 - VP：當天成交量最大的那根 1 分 K 的收盤價，開盤那根也算；量相同時維持原本那根。正在形成的 K 棒量超過目前的最大量時，
   VP 跟著現價移動，這根走完才固定。第一根 1 分 K 走完時第一次出現。
@@ -65,6 +66,41 @@ def drawn_value(points: Sequence[MaPoint], minute: datetime) -> float | None:
             break
         value = point.value
     return value
+
+
+def live_moving_average_by_trade(trades: Sequence[Trade], minutes: int, period: int, session: Session,
+                                 prior: Sequence[Bar] = ()) -> list[LinePoint]:
+    """每筆成交後的即時均線（盤中的畫法，L5）：最近 period − 1 根已走完的 N 分 K 收盤與現價的平均。
+
+    trades 是 session_trades 的 included；prior 是前一交易日的 N 分 K（依時間排序）。
+    """
+    return _live_average([(trade.time, trade.time, trade.price) for trade in trades], minutes, period, session, prior)
+
+
+def live_moving_average_by_bar(bars: Sequence[Bar], minutes: int, period: int, session: Session,
+                               prior: Sequence[Bar] = ()) -> list[LinePoint]:
+    """每根 1 分 K 走完時的即時均線（等於那一分鐘最後一筆成交後的值）。bars 是當天的 1 分 K。"""
+    return _live_average([(bar.end, bar.start, bar.close) for bar in bars], minutes, period, session, prior)
+
+
+def _live_average(events: Sequence[tuple[datetime, datetime, float]], minutes: int, period: int, session: Session,
+                  prior: Sequence[Bar]) -> list[LinePoint]:
+    """events：（值成立的時刻、用來分 N 分 K 的時間、價格），依時間排序。"""
+    if period <= 0:
+        raise ValueError("period 必須大於 0")
+    completed = [bar.close for bar in prior[-(period - 1):]] if period > 1 else []
+    forming_start: datetime | None = None
+    forming_close = 0.0
+    points = []
+    for moment, when, price in events:
+        start = bucket_start(when, minutes, session)
+        if forming_start is not None and start != forming_start:   # 上一根走完
+            completed.append(forming_close)
+        forming_start, forming_close = start, price
+        window = (completed[-(period - 1):] if period > 1 else []) + [price]
+        value = normalize(sum(window) / period) if len(window) == period else None
+        points.append(LinePoint(time=moment, value=value))
+    return points
 
 
 def vwap_by_trade(trades: Sequence[Trade]) -> list[LinePoint]:

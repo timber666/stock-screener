@@ -27,8 +27,8 @@ from screener.jobs import JobFailed
 from screener.realtime.bars import Bar, Trade, build_bars, resample, session_trades
 from screener.realtime.config import DaytradeConfig, RealtimeConfig, ShioajiKeys
 from screener.realtime.history import kbars_to_bars, parse_kbars, parse_ticks, split_days, ticks_to_trades
-from screener.realtime.indicators import (MaPoint, drawn_value, moving_average, value_at, volume_profile_by_bar,
-                                          vwap_by_bar)
+from screener.realtime.indicators import (LinePoint, MaPoint, drawn_value, live_moving_average_by_bar, moving_average,
+                                          value_at, volume_profile_by_bar, vwap_by_bar)
 from screener.realtime.recorder import read_records, recording_path
 from screener.realtime.shioaji_source import ShioajiClient, ShioajiRequestError
 from screener.realtime.ticks import trades_by_code
@@ -136,16 +136,18 @@ def _minute_rows(bars: Sequence[Bar], reference: Sequence[Bar] | None, prior: Se
     session = daytrade.session
     averages: dict[str, list[MaPoint]] = {}
     known: dict[str, list[MaPoint]] = {}
+    live: dict[str, list[LinePoint]] = {}
     for spec in daytrade.moving_averages:
         prior_bars = resample(prior, spec.bar_minutes, session)
         averages[spec.id] = moving_average(resample(bars, spec.bar_minutes, session), spec.period, prior=prior_bars)
-        # 當天第一根走完之前，最後一根已走完的是前一交易日的最後一根（均線延續前一交易日，L5）
+        # 當天第一根走完之前，最後一根已走完的是前一交易日的最後一根（均線延續前一交易日，L5、L17）
         known[spec.id] = moving_average(prior_bars, spec.period)[-1:] + averages[spec.id]
+        live[spec.id] = live_moving_average_by_bar(bars, spec.bar_minutes, spec.period, session, prior=prior_bars)
     vwap = vwap_by_bar(bars)
     vp = volume_profile_by_bar(bars)
     other = {bar.start: bar for bar in reference or ()}
     rows = []
-    for bar, vwap_point, vp_point in zip(bars, vwap, vp):
+    for index, (bar, vwap_point, vp_point) in enumerate(zip(bars, vwap, vp)):
         row: dict[str, Any] = {"start": bar.start.strftime("%H:%M"), "open": bar.open, "high": bar.high,
                                "low": bar.low, "close": bar.close, "volume": bar.volume, "amount": round(bar.amount)}
         if reference is not None:
@@ -155,7 +157,8 @@ def _minute_rows(bars: Sequence[Bar], reference: Sequence[Bar] | None, prior: Se
                        b_volume=ref.volume if ref else None, same_as_b=_same(bar, ref))
         for spec in daytrade.moving_averages:
             row[f"{spec.id}_drawn"] = drawn_value(averages[spec.id], bar.start)        # 歷史圖上畫的值
-            row[f"{spec.id}_known"] = value_at(known[spec.id], bar.end)                # 這根走完時規則能用的值
+            row[f"{spec.id}_known"] = value_at(known[spec.id], bar.end)                # 這根走完時的「走完的值」
+            row[f"{spec.id}_live"] = live[spec.id][index].value                        # 這根走完時的即時值（畫面上的線）
         row["vwap"] = vwap_point.value
         row["vp"] = vp_point.value
         rows.append(row)

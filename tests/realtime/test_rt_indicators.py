@@ -5,9 +5,10 @@ from datetime import date, timedelta
 import pytest
 
 from rt_fixtures import SESSION, at, load_trades
-from screener.realtime.bars import Trade, build_bars, session_trades
-from screener.realtime.indicators import (drawn_value, moving_average, value_at, volume_profile_by_bar,
-                                          volume_profile_by_trade, vwap_by_bar, vwap_by_trade)
+from screener.realtime.bars import Trade, bucket_start, build_bars, session_trades
+from screener.realtime.indicators import (drawn_value, live_moving_average_by_bar, live_moving_average_by_trade,
+                                          moving_average, value_at, volume_profile_by_bar, volume_profile_by_trade,
+                                          vwap_by_bar, vwap_by_trade)
 
 FRIDAY = date(2026, 11, 13)
 MONDAY = date(2026, 11, 16)
@@ -90,6 +91,43 @@ def test_value_is_known_only_after_bar_completes(tw_university: tuple[list[Trade
 def test_moving_average_rejects_bad_period() -> None:
     with pytest.raises(ValueError):
         moving_average([], 0)
+    with pytest.raises(ValueError):
+        live_moving_average_by_trade([], 3, 0, SESSION)
+
+
+def test_live_value_follows_price_until_bar_completes(tw_university: tuple[list[Trade], list[Trade]]) -> None:
+    # L5（2026-11-19）：形成中的 3 分 K 以現價代入，台股大學堂的垂直線跟著現價上下移動；這根走完時等於走完的值
+    today, previous = tw_university
+    trades = session_trades(today, MONDAY, SESSION).included
+    points = live_moving_average_by_trade(trades, 3, 3, SESSION, prior=_bars(previous, FRIDAY, 3))
+    live = {point.time.strftime("%H:%M:%S"): point.value for point in points}
+
+    # 09:00 那根的成交：前一交易日最後兩根（56.3、56.5）與現價 57.0，當天第一根走完前也有值
+    assert live["09:02:10"] == pytest.approx((56.3 + 56.5 + 57.0) / 3)
+    assert live["09:04:10"] == pytest.approx((56.5 + 57.0 + 56.9) / 3)    # 09:03 那根形成中，現價 56.9 → 56.80
+    assert live["09:05:10"] == pytest.approx((56.5 + 57.0 + 57.4) / 3)    # 現價 57.4 → 56.97，即 09:03 那根走完的值
+
+
+def test_live_value_at_bar_end_equals_completed_value(tw_university: tuple[list[Trade], list[Trade]]) -> None:
+    # 每根 N 分 K 最後一根有成交的 1 分 K 走完時，即時值 = 這根 N 分 K 走完的值（歷史圖上的那一階）
+    today, previous = tw_university
+    minute_bars = _bars(today, MONDAY, 1)
+    for minutes, period in ((3, 3), (5, 5)):
+        prior = _bars(previous, FRIDAY, minutes)
+        live = live_moving_average_by_bar(minute_bars, minutes, period, SESSION, prior=prior)
+        completed = moving_average(_bars(today, MONDAY, minutes), period, prior=prior)
+
+        at_bucket_end = {bucket_start(bar.start, minutes, SESSION): point.value for bar, point in zip(minute_bars, live)}
+        assert at_bucket_end == pytest.approx({point.bar_start: point.value for point in completed})
+
+
+def test_live_value_needs_enough_bars_without_previous_day() -> None:
+    # L13：沒有前一交易日時，前兩根 3 分 K 走完、第三根有第一筆成交（09:06:30）才有即時值
+    live = live_moving_average_by_trade(_every_minute(MONDAY, "09:30"), 3, 3, SESSION)
+
+    first = next(point for point in live if point.value is not None)
+    assert first.time == at(MONDAY, "09:06:30")
+    assert first.value == pytest.approx((102 + 105 + 106) / 3)            # 09:00、09:03 兩根的收盤與現價
 
 
 # --- 均價線 -----------------------------------------------------------------------
