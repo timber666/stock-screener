@@ -2,7 +2,7 @@
 
 在收盤前（預設 13:10）依自訂的技術面規則掃描觀察清單，把符合型態的台股依族群分組推播到 Discord。
 
-> 🚧 開發中：已完成 M0–M11（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)；M12 起的盤中即時系統（M12 Shioaji 接入與實測完成）見 [REALTIME_PLAN.md](REALTIME_PLAN.md)。
+> 🚧 開發中：已完成 M0–M11（盤中選股、推播與排程、訊號回測、訊號紀錄與每週成績單、交易回測、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股）。完整規劃見 [PROJECT_PLAN.md](PROJECT_PLAN.md)；M7 起的量化研究規劃見 [RESEARCH_PLAN.md](RESEARCH_PLAN.md)；M12 起的盤中即時系統（M12 Shioaji 接入與實測完成；M13 盤中資料研究進行中：歷史 1 分 K 的回補與品質檢查）見 [REALTIME_PLAN.md](REALTIME_PLAN.md)。
 
 ## 架構
 
@@ -60,7 +60,7 @@ python -m venv .venv-realtime
 | `config/settings.yaml` | 資料庫、log 與 MIS 原始快照的路徑、回補天數；FinMind、MIS、Discord 的請求頻率、逾時與重試 |
 | `config/backtest.yaml` | 訊號回測與交易回測的期間、持有天數、交易成本等：`backtest`、`trade-backtest` 讀取，`factor-report`、`portfolio-backtest`、`portfolio-track` 也沿用其中的驗證段起點與交易成本；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
 | `config/research.yaml` | 研究指令的設定：`events` 的重查天數與交叉驗證門檻、證交所 ISIN 清單的請求設定、訊號成績單的持有天數與輸出位置、全市場資料（`market`：期間、股票池、請求間隔、`market.db` 的位置）、單因子研究（`factors`：持有天數、分組數、因子清單）；只有研究指令會讀取，寫錯不影響每日的 `update`、`scan` |
-| `config/realtime.yaml` | 盤中即時系統：對照用的股票、Shioaji 的逾時與查詢間隔、實測報告、錄製檔與對照輸出的位置；只有 `rt-` 指令會讀取，寫錯不影響每日的 `update`、`scan` |
+| `config/realtime.yaml` | 盤中即時系統：對照用的股票、Shioaji 的逾時與查詢間隔、實測報告、錄製檔與對照輸出的位置、歷史分 K 的回補（`backfill`：起點、流量停止點、轉市場的股票、案例股）與品質檢查（`check`）；只有 `rt-` 指令會讀取，寫錯不影響每日的 `update`、`scan` |
 | `config/daytrade.yaml` | 當沖：交易時段（K 棒的對齊與收盤）、3MA、5MA 的分鐘數與根數；只有 `rt-` 指令會讀取 |
 | `.env` | FinMind token、Discord webhook URL（`DISCORD_WEBHOOK_URL` 每日選股、`DISCORD_RESEARCH_WEBHOOK_URL` 研究的定期報告，建議另開一個頻道）；Shioaji 的 `SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`（盤中即時系統）；從 `.env.example` 複製。FinMind token 到 [FinMind](https://finmindtrade.com/) 免費註冊取得；webhook 在 Discord 頻道的「編輯頻道 → 整合 → Webhook」建立後複製網址 |
 
@@ -92,6 +92,8 @@ python -m screener --help
 | `python -m screener rt-probe` | Shioaji 實測：登入正式環境、合約、快照、歷史分 K 與逐筆成交、訂閱，結果寫成報告（盤中即時系統，用 `.venv-realtime`） |
 | `python -m screener rt-record` | 盤中錄製：訂閱觀察清單的成交（對照股另訂五檔），原樣寫入 `data/ticks/YYYY-MM-DD.jsonl.gz`，到 13:35 或按 Ctrl+C 為止 |
 | `python -m screener rt-bars` | 組 1／3／5 分 K、算 3MA、5MA、均價線與 VP，和 Shioaji 的歷史分 K、13:10 的 MIS 快照比對，輸出和台股大學堂對照用的清單 |
+| `python -m screener rt-backfill` | 回補觀察清單的歷史 1 分 K 到 `data/intraday.db`，當天的流量用到 450 MB 就停止，下次從缺的地方繼續；`--dry-run` 只列出要查的區間與預估流量 |
+| `python -m screener rt-check` | 1 分 K 的品質檢查：每檔每天合起來和 `screener.db` 的日 K 比對，輸出 `data/realtime/check/report.md` 與明細 CSV |
 | `python -m screener factor-snapshot` | 因子快照：全部上市櫃普通股最新一個月的營收年增與排名，寫到 `data/factor_snapshot.csv`，供盤中推播顯示；`--dry-run` 只印摘要與觀察清單的值 |
 
 安裝後也可以用 `screener` 取代 `python -m screener`。log 寫入 `logs/screener-YYYY-MM-DD.log`，包含每條觸發規則的細節（例：「實體 10.7%，量比 5.41x，突破 40 日高 97.9」）。
@@ -282,7 +284,7 @@ python -m screener signal-report --dry-run
 - 有 M6 回測結果（`data/backtest/summary.csv`）時，累積的每條規則附上 M6 驗證段的平均超額報酬作為參考。
 - 輸出：推播到研究頻道（`DISCORD_RESEARCH_WEBHOOK_URL`，未設定時以結束碼 2 結束；`--dry-run` 除外），以及每個訊號一列的明細 `data/research/signal_report/<期間最後一天>.csv`。
 
-### 盤中即時系統（`rt-probe`、`rt-record`、`rt-bars`）
+### 盤中即時系統（`rt-probe`、`rt-record`、`rt-bars`、`rt-backfill`、`rt-check`）
 
 M12：把 Shioaji 的資料摸清楚，並確認自己組的 K 棒與四條線和台股大學堂一致（[REALTIME_PLAN.md](REALTIME_PLAN.md) 7.1）。只讀取行情，不下單；不寫入 `screener.db`。指令要用 `.venv-realtime` 的 Python：
 
@@ -294,6 +296,29 @@ M12：把 Shioaji 的資料摸清楚，並確認自己組的 K 棒與四條線�
 - `rt-record`：開盤前啟動，到 13:35 自動停止（`--until` 改結束時間，`--codes` 只錄指定的股票，`--connections` 改連線數）。每筆收到就寫入，程式中斷時最多遺失 1 秒的資料；同一天重新啟動會接在原本的檔案後面。
 - `rt-bars`：A（錄製檔或歷史逐筆成交）對 B（Shioaji 的歷史分 K）逐分鐘比對，並輸出 `data/realtime/bars/<日期>/checklist_*.md`：開盤、盤中幾個時點、收盤前後與冷門股沒有成交的時段，供在台股大學堂對照（`--source record|ticks|kbars`）。
 - K 棒與四條線的定義見 [REALTIME_PLAN.md](REALTIME_PLAN.md) 第 2 節：1 分 K 以開始時間標示、試撮與沒有成交的分鐘不畫、13:30 的收盤成交自成一根；3MA、5MA 延續前一交易日，形成中的 K 棒跟著現價移動（即時值），走完才固定（走完的值）；規則用哪一個待設計當沖規則時決定（Q12）。
+
+M13：回補歷史 1 分 K，供當沖回測與盤中研究使用（[REALTIME_PLAN.md](REALTIME_PLAN.md) 7.2）。
+
+```bash
+.venv-realtime\Scripts\python -m screener rt-backfill --dry-run
+.venv-realtime\Scripts\python -m screener rt-backfill
+.venv-realtime\Scripts\python -m screener rt-check
+```
+
+- `rt-backfill`：觀察清單每檔從 2020-06-01 或上市櫃日起（上市櫃前的興櫃交易不回補；轉市場的股票列在 `backfill.market_transfers`，照常從 2020-06-01 起），查詢 `screener.db` 有日 K、`intraday.db` 還沒查過的股日，由新到舊、每次一檔最多 30 天。每次查詢前讀 Shioaji 的流量，當天用到 450 MB 就停止；每次查詢在同一個交易內寫入，中斷或停止後再執行會從缺的地方繼續。平日 08:30～13:40 不執行（盤中查 kbars 有次數限制）。`--codes`、`--start`、`--end` 限定範圍；`--case` 只回補 `backfill.cases` 的案例股（不在觀察清單）。全部約 43 萬個股日、4.2 GB 流量，約 10 個交易日補完；資料庫約 6 GB。
+- `rt-check`：隨時可以執行（只讀資料庫，不登入）。比對開高低收（要完全相同）、量的比例（1 分 K 不含零股、盤後定價、鉅額交易，略低於 1），列出缺漏與依年度的格式檢查；回補還在進行時，還沒回補的股日只計數。
+
+回補期間的暫時排程：平日 14:30 執行 `rt-backfill`，錯過時不補跑（開機時間可能在盤中）。以 PowerShell 在專案根目錄執行（`register_tasks.ps1` 用的是 `.venv`，所以另外註冊）：
+
+```powershell
+$dir = (Get-Location).Path
+$action = New-ScheduledTaskAction -Execute "$dir\.venv-realtime\Scripts\python.exe" -Argument "-m screener rt-backfill" -WorkingDirectory $dir
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday -At 14:30
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable:$false -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName "stock-screener-rt-backfill" -Action $action -Trigger $trigger -Settings $settings -Description "stock-screener M13: backfill 1-minute bars (temporary)" -Force
+```
+
+補完（`rt-backfill` 印出「要查的股日都查過了」）後刪除：`Unregister-ScheduledTask -TaskName "stock-screener-rt-backfill" -Confirm:$false`。
 
 ## 選股規則
 

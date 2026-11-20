@@ -151,6 +151,8 @@ def config_dir(tmp_path: Path) -> Path:
     realtime["probe"]["output_dir"] = str(tmp_path / "data" / "realtime" / "probe")
     realtime["record"]["tick_dir"] = str(tmp_path / "data" / "ticks")
     realtime["bars"]["output_dir"] = str(tmp_path / "data" / "realtime" / "bars")
+    realtime["backfill"]["db_path"] = str(tmp_path / "data" / "intraday.db")
+    realtime["check"]["output_dir"] = str(tmp_path / "data" / "realtime" / "check")
     write_yaml(realtime_path, realtime)
     return target
 

@@ -39,7 +39,7 @@ RESEARCH_MODULES = ("plotly", "screener.backtest", "screener.research", "screene
                     "screener.jobs.portfolio_backtest", "screener.jobs.portfolio_track", "screener.jobs.factor_snapshot")
 # 盤中即時系統（REALTIME_PLAN.md 4.2 規則 1、5）：shioaji 只裝在 .venv-realtime，排程的環境沒有
 REALTIME_MODULES = ("shioaji", "screener.realtime", "screener.jobs.rt_probe", "screener.jobs.rt_record",
-                    "screener.jobs.rt_bars")
+                    "screener.jobs.rt_bars", "screener.jobs.rt_backfill", "screener.jobs.rt_check")
 
 _LOADED_RESEARCH_MODULES = """
 import sys
@@ -102,6 +102,20 @@ def test_realtime_command_without_keys_is_config_error(config_dir: Path, monkeyp
 
     assert main(["--config-dir", str(config_dir), "rt-probe", "--tests", "T1"]) == EXIT_CONFIG_ERROR
     assert "未設定 SHIOAJI_API_KEY、SHIOAJI_SECRET_KEY" in read_log(config_dir)
+
+
+def test_backfill_dry_run_needs_no_keys(config_dir: Path, monkeypatch: pytest.MonkeyPatch,
+                                        capsys: pytest.CaptureFixture[str]) -> None:
+    # rt-backfill --dry-run 不登入：沒有 .env 的金鑰也能執行（REALTIME_PLAN.md 7.2 第 2 點）；沒有 --dry-run 才需要金鑰
+    monkeypatch.chdir(config_dir.parent)
+    with SqlitePriceStore(Path(read_yaml(config_dir / "settings.yaml")["db_path"])) as store:
+        store.upsert_bars([DailyBar("2330", date(2026, 11, 19), 100.0, 100.0, 100.0, 100.0, 1000)])
+
+    assert main(["--config-dir", str(config_dir), "rt-backfill", "--dry-run"]) == EXIT_OK
+    assert "要查的股日 1" in capsys.readouterr().out
+    assert main(["--config-dir", str(config_dir), "rt-backfill"]) == EXIT_CONFIG_ERROR
+    assert main(["--config-dir", str(config_dir), "rt-check"]) == EXIT_FAILED          # 還沒有 intraday.db
+    assert "先執行 rt-backfill" in read_log(config_dir)
 
 
 def test_invalid_replay_date_is_rejected() -> None:

@@ -4,7 +4,7 @@
 portfolio-track、factor-snapshot）的程式在執行該指令時才匯入：每日排程的 update、scan
 不載入任何研究程式、研究設定與研究套件（PROJECT_PLAN.md 10.4）。
 
-盤中即時系統的指令（rt-probe、rt-record、rt-bars）同樣在執行時才匯入：update、scan 不載入 shioaji 與 screener.realtime
+盤中即時系統的指令（rt-probe、rt-record、rt-bars、rt-backfill、rt-check）同樣在執行時才匯入：update、scan 不載入 shioaji 與 screener.realtime
 （REALTIME_PLAN.md 4.2）。
 """
 
@@ -212,6 +212,33 @@ def build_parser() -> argparse.ArgumentParser:
                              help="A 的來源：record 錄製檔、ticks 歷史逐筆成交、kbars 歷史分 K"
                                   "（預設：有當天的錄製檔就用 record，否則 kbars）")
 
+    backfill_parser = commands.add_parser(
+        "rt-backfill",
+        help="回補歷史 1 分 K 到 intraday.db，接近流量上限時停止（盤中即時系統）",
+        description="向 Shioaji 查詢觀察清單的歷史 1 分 K（screener.db 有日 K 的日子，由新到舊），寫入 realtime.yaml 的 "
+                    "backfill.db_path；當天的流量用到 backfill.traffic_stop_mb 就停止，下次從缺的股日繼續"
+                    "（REALTIME_PLAN.md 7.2 第 3 點）。只讀取行情。",
+    )
+    backfill_parser.add_argument("--codes", type=_parse_ids, metavar="CODE,CODE",
+                                 help="只回補指定的股票（預設為觀察清單全部；--case 時為案例股的代號）")
+    backfill_parser.add_argument("--start", type=_parse_date, metavar="YYYY-MM-DD",
+                                 help="只回補這天以後（預設為 backfill.start）")
+    backfill_parser.add_argument("--end", type=_parse_date, metavar="YYYY-MM-DD",
+                                 help="只回補這天以前（預設為 screener.db 的最後一天）")
+    backfill_parser.add_argument("--case", action="store_true",
+                                 help="只回補不在觀察清單的案例股（backfill.cases，L20）")
+    backfill_parser.add_argument("--dry-run", action="store_true",
+                                 help="只列出要查的區間與預估流量，不登入、不查詢、不寫入")
+
+    check_parser = commands.add_parser(
+        "rt-check",
+        help="1 分 K 的品質檢查：合起來和 screener.db 的日 K 比對（盤中即時系統）",
+        description="intraday.db 的 1 分 K 每檔每天合起來，和 screener.db 的日 K 比對開高低收與量，列出缺漏與格式的檢查，"
+                    "輸出到 realtime.yaml 的 check.output_dir（REALTIME_PLAN.md 7.2 第 4 點）。不登入 Shioaji。",
+    )
+    check_parser.add_argument("--codes", type=_parse_ids, metavar="CODE,CODE",
+                              help="只檢查指定的股票（預設為觀察清單全部）")
+
     analyze_parser = commands.add_parser(
         "analyze",
         help="輸出指定股票的轉折點與趨勢",
@@ -380,6 +407,16 @@ def _run_realtime(args: argparse.Namespace, config: AppConfig) -> None:
 
         rt_bars.run(config, realtime, daytrade, load_shioaji_keys(ENV_FILE),
                     day=args.date or rt_probe.default_probe_day(datetime.now()), codes=args.codes, source=args.source)
+    elif args.command == "rt-backfill":
+        from screener.jobs import rt_backfill
+
+        keys = None if args.dry_run else load_shioaji_keys(ENV_FILE)    # --dry-run 不登入，不需要金鑰
+        rt_backfill.run(config, realtime, daytrade, keys, codes=args.codes, start=args.start, end=args.end,
+                        case=args.case, dry_run=args.dry_run)
+    elif args.command == "rt-check":
+        from screener.jobs import rt_check
+
+        rt_check.run(config, realtime, daytrade, codes=args.codes)
     else:
         raise AssertionError(f"未處理的指令：{args.command}")
 

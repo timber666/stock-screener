@@ -33,3 +33,23 @@ record:                         # rt-record（7.1 第 4 點）
 bars:                           # rt-bars（7.1 第 6 點）
   output_dir: data/realtime/bars
   prior_lookback_days: 14       # 往前查這麼多個日曆天的分 K，取最後一個交易日延續均線（涵蓋連假）
+
+backfill:                       # rt-backfill（7.2 第 3 點，L18–L20、L25）：歷史 1 分 K 寫入 intraday.db
+  db_path: data/intraday.db     # bars_1m、days、fetch_log；只有即時系統讀寫
+  start: 2020-06-01             # 回補的起點：screener.db 日 K 的第一天（L18）；上市櫃日較晚的股票從上市櫃日起（L25）
+  traffic_stop_mb: 450          # 當天的流量用到這裡就停止（上限 500 MB），保留額度給其他查詢
+  max_query_days: 30            # 每次查詢最多幾個日曆天（kbars 每次不超過 30 天）
+  max_failures: 3               # 連續幾次查詢失敗就停止（結束碼 1）
+  bytes_per_stock_day: 10500    # --dry-run 的流量預估：試補 3 檔每個股日 8.7 KB（平均 161 根），近期每檔每天約 204 根（M13）
+  progress_every: 100           # 每隔幾次查詢在 log 記錄一次進度
+  blocked_hours: ["08:30", "13:40"]   # 平日這段時間不執行（--dry-run 除外）：盤中查 kbars 最多 270 次，多次超過可能暫停帳號（第 3 節）
+  # 轉市場的股票（L25）：screener.db 的上市櫃日是轉到目前市場的日子，之前是正常的上市櫃交易，照常從 start 起。
+  # 其他股票上市櫃日之前的日 K 是興櫃交易，不回補。觀察清單新增轉過市場的股票時加在這裡。
+  market_transfers: ["6438", "6125"]   # 迅得 2021-01-19 上櫃轉上市、廣運 2026-06-01 上櫃轉上市
+  cases:                        # 不在觀察清單的案例股（L20），--case 時回補；交易日以 screener.db 的日期為準，含前一交易日
+    - { code: "2486", name: 一詮, start: 2026-01-19, end: 2026-01-28 }
+
+check:                          # rt-check（7.2 第 4 點）：1 分 K 合起來和 screener.db 的日 K 比對
+  output_dir: data/realtime/check
+  volume_ratio_min: 0.8         # 1 分 K 的量 ÷ 日 K 的量低於這個比例的股日列出明細（日 K 含零股、盤後定價、鉅額交易，D21）
+  listed: 20                    # 報告中每一類最多列出幾筆，全部的明細在 CSV

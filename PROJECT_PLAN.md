@@ -1,6 +1,6 @@
 # 台股技術面盤中選股系統：專案規劃書
 
-> 版本：v0.39（2026-11-19）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 全市場資料完成，見 `RESEARCH_PLAN.md` 4.3；M9 單因子研究完成，見 `RESEARCH_PLAN.md` 4.4、4.5；M10 組合回測與模擬組合完成，見 `RESEARCH_PLAN.md` 4.6；M11 回饋到每日選股完成：推播顯示營收年增（D57、D58）；交易回測的因子挑選沒有一致的改善，因子不成為篩選規則，見 `RESEARCH_PLAN.md` 4.7、R43；M12 起的盤中即時系統：M12 Shioaji 接入與實測完成，見 `REALTIME_PLAN.md` 7.1、D59）
+> 版本：v0.40（2026-11-20）｜狀態：開發中（M0–M7 完成；多方的進場規則已接到推播標示（5.5），進出場規則用於交易回測（5.4、`RESEARCH_PLAN.md` 4.2），空方的進出場先不做（D55）；M8 全市場資料完成，見 `RESEARCH_PLAN.md` 4.3；M9 單因子研究完成，見 `RESEARCH_PLAN.md` 4.4、4.5；M10 組合回測與模擬組合完成，見 `RESEARCH_PLAN.md` 4.6；M11 回饋到每日選股完成：推播顯示營收年增（D57、D58）；交易回測的因子挑選沒有一致的改善，因子不成為篩選規則，見 `RESEARCH_PLAN.md` 4.7、R43；M12 起的盤中即時系統：M12 Shioaji 接入與實測完成，見 `REALTIME_PLAN.md` 7.1、D59；M13 盤中資料研究實作中，見 `REALTIME_PLAN.md` 7.2）
 >
 > 本文件是每日選股系統與共用部分的單一事實來源；研究功能（M7 起）的規劃在 `RESEARCH_PLAN.md`，盤中即時系統（M12 起）的規劃在 `REALTIME_PLAN.md`，三者的邊界見 10.4。實作前請完整閱讀。標記「⚠️ 待確認」的項目是使用者尚未拍板的決定：請採用文中預設值，並保持可在設定檔調整，不要自行改變規則語意。已拍板的決定記錄在第 15 節，不需要再次詢問。
 
@@ -724,7 +724,7 @@ class ExitRule(Rule):          # 出場規則（5.4）：只用於交易回測
 - 每日系統、共用模組與研究程式都不匯入即時系統的程式（`src/screener/realtime/`）。
 - 即時系統的設定（`realtime.yaml`、`daytrade.yaml`）、資料（`realtime.db`、`intraday.db`、錄製檔）、套件（選用依賴群組 `realtime`）與排程都分開；可以唯讀 `screener.db` 的日 K，不寫入。
 - 13:10 的 `scan` 繼續用 MIS，不依賴 Shioaji。
-- 即時系統的指令（M12：`rt-probe`、`rt-record`、`rt-bars`）在執行時才匯入；shioaji 只裝在另一個虛擬環境 `.venv-realtime`，排程用的 `.venv` 不安裝（`REALTIME_PLAN.md` L14）。
+- 即時系統的指令（M12：`rt-probe`、`rt-record`、`rt-bars`；M13：`rt-backfill`、`rt-check`）在執行時才匯入；shioaji 只裝在另一個虛擬環境 `.venv-realtime`，排程用的 `.venv` 不安裝（`REALTIME_PLAN.md` L14）。
 - 以測試確認（`tests/test_cli.py`）：另開一個行程執行 `update`、`scan --dry-run`、`scan --replay --dry-run` 後，`shioaji`、`screener.realtime` 與即時系統指令的 job 都沒有被載入；`realtime.yaml`、`daytrade.yaml` 不存在或寫錯時，`update`、`scan` 照常執行。測試中 `import shioaji` 一律失敗（`tests/conftest.py`），不會連到 Shioaji。
 
 ---
@@ -788,7 +788,7 @@ stock-screener/
 │   ├── rules.yaml
 │   ├── backtest.yaml          # 訊號回測（14.1）與交易回測，只有研究指令會讀取（9.3）
 │   ├── research.yaml          # 研究的設定（9.5），只有研究指令會讀取
-│   ├── realtime.yaml          # 盤中即時系統（REALTIME_PLAN.md 4.2）：Shioaji 的請求、實測、錄製與對照；只有 rt- 指令會讀取
+│   ├── realtime.yaml          # 盤中即時系統（REALTIME_PLAN.md 4.2）：Shioaji 的請求、實測、錄製與對照、歷史分 K 的回補與品質檢查；只有 rt- 指令會讀取
 │   └── daytrade.yaml          # 當沖：交易時段、3MA／5MA 的參數（之後加上當沖規則）；只有 rt- 指令會讀取
 ├── src/screener/
 │   ├── __main__.py            # CLI：update / scan / analyze；研究指令（events、backtest、signal-report、market-update 等）與即時系統的 rt- 指令執行時才匯入
@@ -852,7 +852,10 @@ stock-screener/
 │   │   ├── ticks.py           # 錄製的即時成交 → 成交
 │   │   ├── bars.py            # 逐筆成交 → 1／3／5 分 K（純函式）
 │   │   ├── indicators.py      # 3MA、5MA、均價線、VP（純函式）
-│   │   └── recorder.py        # 錄製檔（data/ticks/YYYY-MM-DD.jsonl.gz）的寫入與讀取
+│   │   ├── recorder.py        # 錄製檔（data/ticks/YYYY-MM-DD.jsonl.gz）的寫入與讀取
+│   │   ├── intraday.py        # intraday.db（歷史 1 分 K、查過的股日、查詢紀錄）的讀寫（M13）
+│   │   ├── backfill.py        # 回補的規劃：起點、要查的股日、區間與順序、流量的預估（M13，純函式）
+│   │   └── quality.py         # 品質檢查：1 分 K 合起來和日 K 比對（M13，純函式）
 │   └── jobs/
 │       ├── daily_update.py
 │       ├── corporate_events.py  # 抓取除權息與公司行動、對照官方參考價
@@ -869,6 +872,8 @@ stock-screener/
 │       ├── rt_probe.py        # Shioaji 實測（M12）
 │       ├── rt_record.py       # 盤中錄製（M12）
 │       ├── rt_bars.py         # 組 K 棒、算四條線與三方對照（M12）
+│       ├── rt_backfill.py     # 回補歷史 1 分 K 到 intraday.db（M13）
+│       ├── rt_check.py        # 1 分 K 的品質檢查（M13）
 │       └── analyze.py         # 工具指令：輸出轉折點與趨勢
 ├── scripts/
 │   └── register_tasks.ps1     # 在 Windows 工作排程器註冊 scan、update、weekly、market、portfolio、snapshot（第 14 節）
@@ -922,6 +927,9 @@ python -m screener trade-backtest --validate --max-positions 5 --pick rev_yoy  #
 python -m screener rt-probe                            # Shioaji 實測（REALTIME_PLAN.md 7.1；用 .venv-realtime 的 python）
 python -m screener rt-record                           # 盤中錄製：開盤前啟動，到 13:35 或 Ctrl+C
 python -m screener rt-bars --date 2026-11-18 --source ticks  # 組 K 棒、算四條線，輸出和台股大學堂對照用的清單
+python -m screener rt-backfill                         # 回補歷史 1 分 K 到 intraday.db，當天的流量到 450 MB 停止（REALTIME_PLAN.md 7.2）
+python -m screener rt-backfill --dry-run               # 只列出要查的區間與預估流量，不登入
+python -m screener rt-check                            # 1 分 K 合起來和 screener.db 的日 K 比對，輸出品質報告
 ```
 
 `--replay` 與 `--dry-run` 是獨立旗標。回放模式以資料庫中該日（含）以前的日 K 建立 StockContext，該日 K 棒視為「今日」（`is_tentative = false`）；不呼叫 MIS，因此不做交易日與一致性檢查。未加 `--dry-run` 時照常推播，標題標示「回放」（第 11 節）。
@@ -954,7 +962,7 @@ python -m screener rt-bars --date 2026-11-18 --source ticks  # 組 K 棒、算�
 | M6 | 訊號回測：回補 2020-06 起的日 K、除權息與公司行動資料、還原價、歷史訊號的報酬統計（14.1） | `screener backtest` 輸出各規則的統計，並手算數例供使用者對照 | 完成（2026-11-01） |
 | M7–M11 | 研究功能：訊號紀錄與追蹤、全市場資料、單因子研究、組合回測與模擬組合、回饋到每日選股 | 見 `RESEARCH_PLAN.md` 第 4 節 | M7 完成（2026-11-07，`RESEARCH_PLAN.md` 4.1）；M8 完成（2026-11-08，4.3）；M9 完成（2026-11-08，4.4、4.5）；M10 完成（2026-11-14，4.6）；M11 完成（2026-11-11，4.7） |
 | — | 交易回測：模擬 5.4、5.5 的進出場，含挑選與部位上限 | 見 `RESEARCH_PLAN.md` 4.2 | 完成（2026-11-07，D56） |
-| M12–M16 | 盤中即時系統：Shioaji 接入與實測、盤中資料研究、即時服務、看盤網頁、下單（待使用者決定） | 見 `REALTIME_PLAN.md` 第 7 節 | M12 完成（2026-11-19，`REALTIME_PLAN.md` 7.1）；M13–M16 未開始 |
+| M12–M16 | 盤中即時系統：Shioaji 接入與實測、盤中資料研究、即時服務、看盤網頁、下單（待使用者決定） | 見 `REALTIME_PLAN.md` 第 7 節 | M12 完成（2026-11-19，`REALTIME_PLAN.md` 7.1）；M13 實作中（回補與品質檢查完成，`REALTIME_PLAN.md` 7.2）；M14–M16 未開始 |
 
 M4、M5 的驗證：
 
@@ -974,6 +982,8 @@ M4、M5 的驗證：
 | `stock-screener-snapshot` | 週六 09:45 | `python -m screener factor-snapshot` | 開機後補跑（R41）；研究功能，寫入 scan 顯示營收年增用的快照（D57），不推播；`market.db` 還沒更新到上週五時失敗並通知研究頻道（開機補跑時可能比 `market-update` 先跑，之後手動再執行一次） |
 
 以目前使用者身分執行，電腦須開機且已登入；使用電池時也會執行。國定假日照常觸發，scan 判定為非交易日後結束。
+
+盤中即時系統另有一個暫時的工作 `stock-screener-rt-backfill`（M13，`REALTIME_PLAN.md` L19）：平日 14:30 以 `.venv-realtime` 執行 `rt-backfill`，錯過時不補跑（開機時間可能在盤中，盤中 kbars 有次數限制），不在 `register_tasks.ps1` 裡，由使用者另外註冊，回補完成後刪除（README）。
 
 ### 14.1 M6：訊號回測（完成）
 
@@ -1151,6 +1161,7 @@ M4、M5 的驗證：
 
 ## 16. 變更紀錄
 
+- v0.40（2026-11-20）：M13 的回補與品質檢查（`REALTIME_PLAN.md` v0.6、7.2）：即時系統的指令新增 `rt-backfill`、`rt-check` 與 `realtime/intraday.py`、`backfill.py`、`quality.py`（第 12 節、10.4 的即時系統邊界與測試）；第 14 節加上回補期間的暫時排程。回補從 2020-06-01 或上市櫃日起，上市櫃前的興櫃交易（D38）不回補（`REALTIME_PLAN.md` L25）。每日的 `scan`、`update`、規則、設定與推播內容都沒有改變。
 - v0.39（2026-11-19）：M12 完成（`REALTIME_PLAN.md` v0.4、7.1）：錄製日的實測全部有結果，錄製的即時成交組的 1 分 K 和 Shioaji 的歷史分 K 290 檔全部相同，K 棒與四條線和台股大學堂一致（含盤中的即時均線）。第 14 節與開頭的狀態。每日的 `scan`、`update`、規則、設定與推播內容都沒有改變。
 - v0.38（2026-11-18）：M12 Shioaji 接入與實測（`REALTIME_PLAN.md` v0.3、7.1）。新增即時系統的指令 `rt-probe`、`rt-record`、`rt-bars` 與 `src/screener/realtime/`、`config/realtime.yaml`、`config/daytrade.yaml`、選用依賴群組 `realtime`（shioaji，只裝在 `.venv-realtime`）；`.env` 新增 `SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY`（9.4）；10.4 的即時系統邊界補上虛擬環境與測試；第 12、13、14 節同步修改。每日的 `scan`、`update`、規則、設定與推播內容都沒有改變。
 - v0.37（2026-11-18）：新增 D59：M12 起規劃盤中即時系統，另立 `REALTIME_PLAN.md`，取代 D52「先不做盤中即時監測」。版本列、第 0 節閱讀指引、1.2、第 2 節範圍與非目標、10.4 新增即時系統的邊界、第 12 節專案結構、第 14 節里程碑（M12–M16）同步修改；`CLAUDE.md`、`RESEARCH_PLAN.md`（v0.18）與 README 加上新文件的指引。程式、規則、設定值與推播內容都沒有改變。

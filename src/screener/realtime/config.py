@@ -7,7 +7,7 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import time
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -59,12 +59,49 @@ class BarsSettings:
 
 
 @dataclass(frozen=True)
+class CaseStock:
+    """不在觀察清單的案例股（L20）：只回補 start～end 的交易日。"""
+
+    code: str
+    name: str
+    start: date
+    end: date
+
+
+@dataclass(frozen=True)
+class BackfillSettings:
+    db_path: Path
+    start: date                     # 回補的起點（L18）
+    traffic_stop_mb: float          # 當天的流量用到這裡就停止
+    max_query_days: int             # 每次查詢最多幾個日曆天（kbars 的限制）
+    max_failures: int               # 連續幾次查詢失敗就停止
+    bytes_per_stock_day: int        # --dry-run 的流量預估
+    progress_every: int
+    blocked_hours: tuple[time, time]    # 平日這段時間（含開始、不含結束）不執行：盤中 kbars 有次數限制
+    market_transfers: tuple[str, ...]   # 轉市場的股票：上市櫃日之前也是上市櫃交易，從 start 起（L25）
+    cases: tuple[CaseStock, ...]
+
+    @property
+    def traffic_stop_bytes(self) -> int:
+        return int(self.traffic_stop_mb * 1024 * 1024)     # usage() 的上限 500 MB = 524,288,000 bytes（T1）
+
+
+@dataclass(frozen=True)
+class CheckSettings:
+    output_dir: Path
+    volume_ratio_min: float
+    listed: int                     # 報告中每一類最多列出幾筆
+
+
+@dataclass(frozen=True)
 class RealtimeConfig:
     compare_codes: tuple[str, ...]
     shioaji: ShioajiSettings
     probe: ProbeSettings
     record: RecordSettings
     bars: BarsSettings
+    backfill: BackfillSettings
+    check: CheckSettings
 
 
 @dataclass(frozen=True)
@@ -106,13 +143,15 @@ class ShioajiKeys:
 def load_realtime_config(path: Path) -> RealtimeConfig:
     data = _read_yaml(path)
     where = path.name
-    check_keys(data, {"compare_codes", "shioaji", "probe", "record", "bars"}, where)
+    check_keys(data, {"compare_codes", "shioaji", "probe", "record", "bars", "backfill", "check"}, where)
     return RealtimeConfig(
         compare_codes=_parse_codes(data, "compare_codes", where),
         shioaji=_parse_shioaji(get_field(data, "shioaji", dict, where), f"{where} > shioaji"),
         probe=_parse_probe(get_field(data, "probe", dict, where), f"{where} > probe"),
         record=_parse_record(get_field(data, "record", dict, where), f"{where} > record"),
         bars=_parse_bars(get_field(data, "bars", dict, where), f"{where} > bars"),
+        backfill=_parse_backfill(get_field(data, "backfill", dict, where), f"{where} > backfill"),
+        check=_parse_check(get_field(data, "check", dict, where), f"{where} > check"),
     )
 
 
@@ -186,6 +225,60 @@ def _parse_bars(data: Mapping[str, Any], where: str) -> BarsSettings:
     return settings
 
 
+_KBARS_MAX_DAYS = 30                # Shioaji 的 kbars 每次查詢不超過 30 天（第 3 節）
+_USAGE_LIMIT_MB = 500               # 沒有以 API 成交時每天的流量上限（T1）
+
+
+def _parse_backfill(data: Mapping[str, Any], where: str) -> BackfillSettings:
+    check_keys(data, {"db_path", "start", "traffic_stop_mb", "max_query_days", "max_failures", "bytes_per_stock_day",
+                      "progress_every", "blocked_hours", "market_transfers", "cases"}, where)
+    hours = get_field(data, "blocked_hours", list, where)
+    require(len(hours) == 2, f"{where} > blocked_hours：應為 [開始, 結束] 兩個時間")
+    blocked = (_parse_time({"start": hours[0]}, "start", f"{where} > blocked_hours"),
+               _parse_time({"end": hours[1]}, "end", f"{where} > blocked_hours"))
+    require(blocked[0] < blocked[1], f"{where} > blocked_hours：開始必須早於結束")
+    cases = []
+    for index, item in enumerate(get_field(data, "cases", list, where)):
+        item_where = f"{where} > cases[{index}]"
+        require(isinstance(item, dict), f"{item_where}：應為 key: value 結構")
+        check_keys(item, {"code", "name", "start", "end"}, item_where)
+        case = CaseStock(code=get_field(item, "code", str, item_where), name=get_field(item, "name", str, item_where),
+                         start=_parse_date(item, "start", item_where), end=_parse_date(item, "end", item_where))
+        require(case.start <= case.end, f"{item_where}：start 不可晚於 end")
+        cases.append(case)
+    require(len({case.code for case in cases}) == len(cases), f"{where} > cases：代號重複")
+    settings = BackfillSettings(
+        db_path=Path(get_field(data, "db_path", str, where)),
+        start=_parse_date(data, "start", where),
+        traffic_stop_mb=get_field(data, "traffic_stop_mb", float, where),
+        max_query_days=get_field(data, "max_query_days", int, where),
+        max_failures=get_field(data, "max_failures", int, where),
+        bytes_per_stock_day=get_field(data, "bytes_per_stock_day", int, where),
+        progress_every=get_field(data, "progress_every", int, where),
+        blocked_hours=blocked,
+        market_transfers=_parse_codes(data, "market_transfers", where),
+        cases=tuple(cases),
+    )
+    require(0 < settings.traffic_stop_mb < _USAGE_LIMIT_MB,
+            f"{where} > traffic_stop_mb：必須大於 0、小於每天的上限 {_USAGE_LIMIT_MB} MB")
+    require(0 < settings.max_query_days <= _KBARS_MAX_DAYS,
+            f"{where} > max_query_days：必須在 1～{_KBARS_MAX_DAYS} 之間（kbars 每次查詢不超過 30 天）")
+    require(settings.max_failures > 0, f"{where} > max_failures：必須大於 0")
+    require(settings.bytes_per_stock_day > 0, f"{where} > bytes_per_stock_day：必須大於 0")
+    require(settings.progress_every > 0, f"{where} > progress_every：必須大於 0")
+    return settings
+
+
+def _parse_check(data: Mapping[str, Any], where: str) -> CheckSettings:
+    check_keys(data, {"output_dir", "volume_ratio_min", "listed"}, where)
+    settings = CheckSettings(output_dir=Path(get_field(data, "output_dir", str, where)),
+                             volume_ratio_min=get_field(data, "volume_ratio_min", float, where),
+                             listed=get_field(data, "listed", int, where))
+    require(0 < settings.volume_ratio_min <= 1, f"{where} > volume_ratio_min：必須大於 0、不超過 1")
+    require(settings.listed > 0, f"{where} > listed：必須大於 0")
+    return settings
+
+
 # --- daytrade.yaml ----------------------------------------------------------
 
 def load_daytrade_config(path: Path) -> DaytradeConfig:
@@ -246,6 +339,13 @@ def _parse_codes(data: Mapping[str, Any], key: str, where: str) -> tuple[str, ..
     require(all(isinstance(code, str) and code for code in codes), f"{where} > {key}：代號應為字串（加上引號）")
     require(len(codes) == len(set(codes)), f"{where} > {key}：代號重複")
     return tuple(codes)
+
+
+def _parse_date(data: Mapping[str, Any], key: str, where: str) -> date:
+    """YAML 的 2020-06-01 讀成 date；datetime 不接受。"""
+    value = get_field(data, key, date, where)
+    require(not isinstance(value, datetime), f"{where} > {key}：應為日期（YYYY-MM-DD），實際為 {value!r}")
+    return value
 
 
 def _parse_time(data: Mapping[str, Any], key: str, where: str) -> time:

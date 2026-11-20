@@ -1,6 +1,6 @@
 """即時系統的設定：realtime.yaml、daytrade.yaml、.env 的 Shioaji 金鑰（REALTIME_PLAN.md 4.2）。"""
 
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 
 import pytest
@@ -21,6 +21,21 @@ def test_repo_config_loads() -> None:
     assert [(spec.id, spec.bar_minutes, spec.period) for spec in daytrade.moving_averages] == [("ma3", 3, 3),
                                                                                               ("ma5", 5, 5)]
     assert daytrade.bar_minutes == (1, 3, 5)
+    assert realtime.backfill.start == date(2020, 6, 1)                       # screener.db 日 K 的第一天（L18）
+    assert realtime.backfill.traffic_stop_bytes == 450 * 1024 * 1024
+    assert realtime.backfill.market_transfers == ("6438", "6125")              # 上櫃轉上市（L25）
+    assert [(c.code, c.start, c.end) for c in realtime.backfill.cases] == [("2486", date(2026, 1, 19),
+                                                                            date(2026, 1, 28))]   # L20
+
+
+def test_case_start_must_not_be_after_end(tmp_path: Path) -> None:
+    data = read_yaml(REPO_CONFIG_DIR / "realtime.yaml")
+    data["backfill"]["cases"][0].update(start=date(2026, 2, 1), end=date(2026, 1, 1))
+    path = tmp_path / "realtime.yaml"
+    write_yaml(path, data)
+
+    with pytest.raises(ConfigError, match="start 不可晚於 end"):
+        load_realtime_config(path)
 
 
 def test_compare_codes_are_in_watchlist() -> None:
@@ -37,6 +52,15 @@ def test_compare_codes_are_in_watchlist() -> None:
     (lambda d: d.update(compare_codes=[4977]), "代號應為字串"),
     (lambda d: d["probe"].update(snapshot_batches=[50, 0]), "正整數"),
     (lambda d: d["record"].update(connections=0), "必須大於 0"),
+    (lambda d: d["backfill"].update(start="2020/06/01"), "應為日期"),
+    (lambda d: d["backfill"].update(traffic_stop_mb=500), "小於每天的上限 500 MB"),
+    (lambda d: d["backfill"].update(max_query_days=31), "kbars 每次查詢不超過 30 天"),
+    (lambda d: d["backfill"]["cases"][0].update(end="2026-01-01"), "應為日期"),
+    (lambda d: d["backfill"]["cases"].append(dict(d["backfill"]["cases"][0])), "代號重複"),
+    (lambda d: d["check"].update(volume_ratio_min=1.2), "不超過 1"),
+    (lambda d: d["backfill"].update(market_transfers=[6438]), "代號應為字串"),
+    (lambda d: d["backfill"].update(blocked_hours=["13:40", "08:30"]), "開始必須早於結束"),
+    (lambda d: d["backfill"].update(blocked_hours=["08:30"]), "兩個時間"),
 ])
 def test_realtime_config_errors(tmp_path: Path, change, message: str) -> None:
     data = read_yaml(REPO_CONFIG_DIR / "realtime.yaml")
